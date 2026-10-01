@@ -59,37 +59,56 @@ else
   info "Abhängigkeiten vorhanden"
 fi
 
+# Lokale KI (Ollama): App starten, falls installiert, und Modell einmalig laden
+if [ "$BACKEND_ARGS" != "--no-ai" ] && { [ -d /Applications/Ollama.app ] || command -v ollama >/dev/null 2>&1; }; then
+  if ! curl -s -o /dev/null --max-time 2 http://localhost:11434/api/tags; then
+    info "Starte Ollama (lokale KI) …"
+    if [ -d /Applications/Ollama.app ]; then open -g -a Ollama; else (ollama serve >/dev/null 2>&1 &); fi
+    for _ in $(seq 1 30); do
+      curl -s -o /dev/null --max-time 2 http://localhost:11434/api/tags && break
+      sleep 1
+    done
+  fi
+  "$PY" backend.py --setup-ollama || warn "Lokale KI nicht bereit – nutze Cloud-KI bzw. regelbasierte Analyse."
+fi
+
 # Port prüfen, bevor der (ggf. längere) Erstabruf läuft
 if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
   fail "Port $PORT ist belegt. Anderen Port wählen:  ./start.sh --port 8080"
 fi
 
-# --- 2. Erstabruf --------------------------------------------------------------
-info "Erster Datenabruf (kann mit KI-Analyse 1–2 Minuten dauern) …"
-# shellcheck disable=SC2086
-if ! "$PY" backend.py $BACKEND_ARGS; then
-  warn "Backend-Lauf mit Fehler beendet – Dashboard startet trotzdem."
-fi
-
+# --- 2. Datenabruf im Hintergrund ----------------------------------------------
+# Das Dashboard öffnet sofort und füllt sich, während das Backend arbeitet
+# (mit lokaler KI dauert der erste Durchlauf bis zu 20 Minuten).
 LOOP_PID=""
 SERVER_PID=""
+TAIL_PID=""
 cleanup() {
   trap - EXIT INT TERM
   echo
   info "Beende FasTI …"
-  [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null || true
-  [ -n "$LOOP_PID" ] && kill "$LOOP_PID" 2>/dev/null || true
+  for pid in "$SERVER_PID" "$LOOP_PID" "$TAIL_PID"; do
+    [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+  done
   wait 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
+touch backend.log
 if [ "$LOOP" -eq 1 ]; then
   INTERVAL=$("$PY" -c 'import config; print(config.POLL_INTERVAL_MINUTES)')
   # shellcheck disable=SC2086
-  "$PY" backend.py --loop --skip-first $BACKEND_ARGS >>backend.log 2>&1 &
-  LOOP_PID=$!
-  info "Hintergrund-Polling alle ${INTERVAL} Min. aktiv ${c_dim}(Log: backend.log)${c_off}"
+  "$PY" backend.py --loop $BACKEND_ARGS >>backend.log 2>&1 &
+  info "Datenabruf läuft, danach alle ${INTERVAL} Min. ${c_dim}(Log: backend.log)${c_off}"
+else
+  # shellcheck disable=SC2086
+  "$PY" backend.py $BACKEND_ARGS >>backend.log 2>&1 &
+  info "Einmaliger Datenabruf läuft ${c_dim}(Log: backend.log)${c_off}"
 fi
+LOOP_PID=$!
+# Fortschritt im Terminal mitlesen
+tail -n 0 -f backend.log &
+TAIL_PID=$!
 
 # --- 3. Webserver ----------------------------------------------------------------
 # Nur an localhost gebunden – das Dashboard ist nicht im Netzwerk erreichbar.

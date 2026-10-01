@@ -14,9 +14,21 @@ from urllib.parse import quote_plus
 # KI-Analyse
 # ---------------------------------------------------------------------------
 # Reihenfolge der KI-Anbieter. Fällt der erste aus (Überlastung, Kontingent),
-# wird automatisch der nächste mit gültigem Key genommen. Ohne gültigen Key
-# läuft alles regelbasiert.
-AI_PROVIDERS = [p.strip() for p in os.environ.get("AI_PROVIDER", "gemini,groq").split(",") if p.strip()]
+# wird automatisch der nächste genommen. "ollama" = lokale KI auf dem Mac
+# (keine Keys, keine Limits) – wird nur genutzt, wenn Ollama installiert ist.
+# Ohne verfügbare KI läuft alles regelbasiert.
+AI_PROVIDERS = [p.strip() for p in os.environ.get("AI_PROVIDER", "ollama,gemini,groq").split(",") if p.strip()]
+
+# Lokale KI über Ollama (https://ollama.com/download) – start.sh lädt das Modell
+# beim ersten Start automatisch herunter.
+#   Mac mit 8 GB RAM:  "gemma3:4b"  (ca. 3,3 GB Download)
+#   Mac mit 16 GB RAM: "gemma3:12b" (ca. 8 GB, deutlich bessere Bewertungen, langsamer)
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma3:4b")
+OLLAMA_URL = "http://localhost:11434"
+OLLAMA_BATCH_SIZE = 4             # kleine Pakete, damit das Modell nicht den Faden verliert
+OLLAMA_NUM_CTX = 8192             # Kontextfenster (Prompt + Antwort)
+OLLAMA_TIMEOUT = 900              # Sekunden je Anfrage
+OLLAMA_MAX_MINUTES_PER_RUN = 20   # Rechenzeit pro Durchlauf (Intervall ist 30 Min.)
 
 # Key holen: https://aistudio.google.com/apikey
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "DEIN_KEY_HIER")

@@ -1035,12 +1035,22 @@ class AIClient:
         self.usage = usage_root.setdefault(provider, {})
         self.calls_this_run = 0
         self.last_call = 0.0
-        self.models = list(config.GEMINI_MODELS if provider == "gemini" else config.GROQ_MODELS)
-        self.key = config.GEMINI_API_KEY if provider == "gemini" else config.GROQ_API_KEY
+        self.started = time.time()
         self.thinking = config.GEMINI_THINKING_BUDGET
-        self.interval = config.AI_MIN_SECONDS_BETWEEN_CALLS.get(provider, 10.0)
+        self.json_mode = True
+        self.local = provider == "ollama"
+        self.batch_size = OLLAMA_BATCH_SIZE if self.local else config.AI_BATCH_SIZE
+        self.timeout = OLLAMA_TIMEOUT if self.local else config.AI_REQUEST_TIMEOUT
+        self.interval = 0.0 if self.local else config.AI_MIN_SECONDS_BETWEEN_CALLS.get(provider, 10.0)
         if provider == "gemini":
-            self.models = self._discover_gemini(self.models)
+            self.key = config.GEMINI_API_KEY
+            self.models = self._discover_gemini(list(config.GEMINI_MODELS))
+        elif provider == "groq":
+            self.key = config.GROQ_API_KEY
+            self.models = list(config.GROQ_MODELS)
+        else:
+            self.key = ""
+            self.models = ollama_models()
 
     def _discover_gemini(self, preferred: list[str]) -> list[str]:
         """Fragt die für den Key verfügbaren Modelle ab: bevorzugte zuerst, weitere Flash-Modelle als Reserve."""
@@ -1071,6 +1081,8 @@ class AIClient:
         return available or preferred
 
     def budget_left(self) -> bool:
+        if self.local:  # lokal: keine Limits, nur Zeitbudget pro Durchlauf
+            return time.time() - self.started < OLLAMA_MAX_MINUTES_PER_RUN * 60
         today = now_utc().strftime("%Y-%m-%d")
         if self.usage.get("date") != today:
             self.usage.clear()
@@ -1097,7 +1109,7 @@ class AIClient:
 
     @staticmethod
     def _parse(raw: str) -> list[dict]:
-        text = raw.strip()
+        text = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()  # Reasoning-Modelle
         text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text)
         try:
             data = json.loads(text)
@@ -1118,6 +1130,8 @@ class AIClient:
                 try:
                     if self.provider == "gemini":
                         resp = self._gemini(model, prompt)
+                    elif self.provider == "ollama":
+                        resp = self._ollama(model, prompt)
                     else:
                         resp = self._groq(model, prompt)
                 except requests.RequestException as exc:
@@ -1132,6 +1146,18 @@ class AIClient:
                 if status == 400 and self.provider == "gemini" and self.thinking is not None and "thinking" in body.lower():
                     self.thinking = None  # Modell unterstützt thinkingConfig nicht
                     continue
+                if status == 400 and ("json_validate_failed" in body or "validate json" in body.lower()):
+                    # Groq: Modell hat kein sauberes JSON erzeugt → Rohtext retten oder ohne JSON-Modus erneut
+                    try:
+                        failed = resp.json()["error"].get("failed_generation") or ""
+                        if failed and self._parse(failed):
+                            return failed
+                    except (ValueError, KeyError, TypeError, AttributeError):
+                        pass
+                    if self.json_mode:
+                        self.json_mode = False
+                        continue
+                    raise ValueError("KI lieferte kein gültiges JSON")
                 if status == 404 or (status == 400 and "model" in body.lower() and "not" in body.lower()):
                     log.info("Modell %s nicht verfügbar, nehme das nächste.", model)
                     break
@@ -1172,10 +1198,20 @@ class AIClient:
                              headers={"x-goog-api-key": self.key, "Content-Type": "application/json"})
 
     def _groq(self, model: str, prompt: str) -> requests.Response:
-        body = {"model": model, "temperature": 0.2, "response_format": {"type": "json_object"},
+        body = {"model": model, "temperature": 0.2,
                 "messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}]}
-        return requests.post("https://api.groq.com/openai/v1/chat/completions", json=body,
+        if self.json_mode:
+            body["response_format"] = {"type": "json_object"}
+        resp = requests.post("https://api.groq.com/openai/v1/chat/completions", json=body,
                              timeout=config.AI_REQUEST_TIMEOUT, headers={"Authorization": f"Bearer {self.key}"})
+        self.json_mode = True  # nächste Anfrage wieder mit JSON-Modus
+        return resp
+
+    def _ollama(self, model: str, prompt: str) -> requests.Response:
+        body = {"model": model, "stream": False, "format": "json", "keep_alive": "30m",
+                "options": {"temperature": 0.2, "num_ctx": OLLAMA_NUM_CTX},
+                "messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}]}
+        return requests.post(f"{OLLAMA_URL}/api/chat", json=body, timeout=self.timeout)
 
     def _extract(self, data: dict) -> str:
         if self.provider == "gemini":
@@ -1184,10 +1220,35 @@ class AIClient:
                 raise ValueError(f"Leere Gemini-Antwort: {str(data.get('promptFeedback', ''))[:200]}")
             parts = (cands[0].get("content") or {}).get("parts") or []
             return "".join(p.get("text", "") for p in parts if not p.get("thought"))
+        if self.provider == "ollama":
+            return data["message"]["content"]
         return data["choices"][0]["message"]["content"]
 
 
+OLLAMA_URL = getattr(config, "OLLAMA_URL", "http://localhost:11434").rstrip("/")
+OLLAMA_MODEL = getattr(config, "OLLAMA_MODEL", "gemma3:4b")
+OLLAMA_BATCH_SIZE = getattr(config, "OLLAMA_BATCH_SIZE", 4)
+OLLAMA_NUM_CTX = getattr(config, "OLLAMA_NUM_CTX", 8192)
+OLLAMA_TIMEOUT = getattr(config, "OLLAMA_TIMEOUT", 900)
+OLLAMA_MAX_MINUTES_PER_RUN = getattr(config, "OLLAMA_MAX_MINUTES_PER_RUN", 20)
+
+
+def ollama_models() -> list[str]:
+    """Installierte lokale Modelle; das konfigurierte zuerst. Leer, wenn Ollama nicht läuft."""
+    try:
+        resp = requests.get(f"{OLLAMA_URL}/api/tags", timeout=3)
+        resp.raise_for_status()
+        names = [m.get("name", "") for m in resp.json().get("models", [])]
+    except (requests.RequestException, ValueError):
+        return []
+    names = [n for n in names if n and "embed" not in n]
+    preferred = [n for n in names if n == OLLAMA_MODEL or n.split(":")[0] == OLLAMA_MODEL]
+    return preferred + [n for n in names if n not in preferred]
+
+
 def _has_key(provider: str) -> bool:
+    if provider == "ollama":
+        return bool(ollama_models())
     key = config.GEMINI_API_KEY if provider == "gemini" else config.GROQ_API_KEY
     return bool(key) and key.strip() not in ("", "DEIN_KEY_HIER")
 
@@ -1199,7 +1260,11 @@ class AIPool:
         if "date" in usage_root:  # altes Format (ein Zähler für alles)
             usage_root.clear()
         providers = [] if disabled else [p.lower() for p in getattr(config, "AI_PROVIDERS", [getattr(config, "AI_PROVIDER", "gemini")])]
-        self.clients = [AIClient(p, usage_root) for p in providers if p in ("gemini", "groq") and _has_key(p)]
+        if not disabled and "ollama" not in providers and getattr(config, "OLLAMA_AUTO", True):
+            providers.insert(0, "ollama")  # lokale KI zuerst, wenn installiert und gestartet
+        self.clients = [AIClient(p, usage_root) for p in providers if p in ("ollama", "gemini", "groq") and _has_key(p)]
+        if self.clients and self.clients[0].local:
+            log.info("Lokale KI aktiv: Ollama / %s", self.clients[0].model)
         self.status = status
         status.update({"configured": [c.provider for c in self.clients], "run_calls": 0, "run_items": 0})
         if not self.clients and not disabled:
@@ -1217,6 +1282,10 @@ class AIPool:
 
     def budget_left(self) -> bool:
         return bool(self.clients) and self.clients[0].budget_left()
+
+    @property
+    def batch_size(self) -> int:
+        return self.clients[0].batch_size if self.clients else config.AI_BATCH_SIZE
 
     def analyze(self, batch: list[dict]) -> dict[str, dict]:
         while self.clients:
@@ -1339,7 +1408,8 @@ def run_once(use_ai: bool = True) -> None:
     added = dropped = deferred = 0
     queue = list(pending)
     while queue:
-        batch, queue = queue[: config.AI_BATCH_SIZE], queue[config.AI_BATCH_SIZE:]
+        size = ai.batch_size
+        batch, queue = queue[:size], queue[size:]
         results_ai: dict[str, dict] = {}
         if ai and ai.budget_left():
             try:
@@ -1387,7 +1457,8 @@ def upgrade_heuristic(db: dict, ai: AIPool, feeds_status: list[dict], provider: 
     candidates.sort(key=lambda t: (bool(t.get("triggers")), t["severity_score"]), reverse=True)
     upgraded = 0
     while candidates and ai.budget_left():
-        chunk, candidates = candidates[: config.AI_BATCH_SIZE], candidates[config.AI_BATCH_SIZE:]
+        size = ai.batch_size
+        chunk, candidates = candidates[:size], candidates[size:]
         items = [{"id": t["id"], "title": t["source_title"], "text": t["_excerpt"], "link": t["source_url"],
                   "published": t["timestamp"], "feed_name": t["source_name"],
                   "feed_category": t.get("_feed_category") or t["category"]} for t in chunk]
@@ -1413,6 +1484,43 @@ def upgrade_heuristic(db: dict, ai: AIPool, feeds_status: list[dict], provider: 
     return upgraded
 
 
+def setup_ollama() -> int:
+    """Startet keine KI-Analyse, sondern stellt nur sicher, dass das lokale Modell geladen ist."""
+    try:
+        requests.get(f"{OLLAMA_URL}/api/tags", timeout=3).raise_for_status()
+    except requests.RequestException:
+        print("Ollama läuft nicht – lokale KI wird übersprungen.")
+        return 1
+    installed = ollama_models()
+    if any(n == OLLAMA_MODEL or n.split(":")[0] == OLLAMA_MODEL for n in installed):
+        print(f"Lokales Modell bereit: {OLLAMA_MODEL}")
+        return 0
+    print(f"Lade lokales KI-Modell {OLLAMA_MODEL} herunter (einmalig, einige GB) …")
+    try:
+        with requests.post(f"{OLLAMA_URL}/api/pull", json={"model": OLLAMA_MODEL, "stream": True},
+                           stream=True, timeout=(10, 600)) as resp:
+            resp.raise_for_status()
+            last = ""
+            for line in resp.iter_lines():
+                if not line:
+                    continue
+                msg = json.loads(line)
+                if msg.get("error"):
+                    print(f"\nFehler: {msg['error']}")
+                    return 1
+                total, done = msg.get("total"), msg.get("completed")
+                text = f"{msg.get('status', '')} {100 * done / total:5.1f} %" if total and done else msg.get("status", "")
+                if text != last:
+                    sys.stdout.write("\r  " + text.ljust(60))
+                    sys.stdout.flush()
+                    last = text
+        print(f"\nModell {OLLAMA_MODEL} installiert.")
+        return 0
+    except (requests.RequestException, ValueError) as exc:
+        print(f"\nDownload fehlgeschlagen: {exc}")
+        return 1
+
+
 def locked_run(use_ai: bool) -> bool:
     with open(LOCK_FILE, "w") as lock:
         try:
@@ -1434,11 +1542,14 @@ def main() -> None:
     parser.add_argument("--no-ai", action="store_true", help="nur regelbasierte Analyse")
     parser.add_argument("--reset", action="store_true", help="threats.json verwerfen")
     parser.add_argument("--skip-first", action="store_true", help="im Loop-Modus erst nach einem Intervall starten")
+    parser.add_argument("--setup-ollama", action="store_true", help="lokales KI-Modell herunterladen")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s  %(levelname)-7s %(message)s", datefmt="%H:%M:%S")
+    if args.setup_ollama:
+        sys.exit(setup_ollama())
     if args.reset and os.path.exists(DATA_FILE):
         os.remove(DATA_FILE)
         log.info("%s gelöscht.", config.OUTPUT_FILE)

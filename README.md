@@ -13,6 +13,13 @@ Das Skript legt beim ersten Start eine virtuelle Umgebung `.venv` an (umgeht die
 
 Optionen: `--no-ai`, `--no-loop`, `--port 8080`.
 
+## Lokale KI (empfohlen, ohne Keys und Limits)
+
+1. Ollama installieren: https://ollama.com/download → „Download for macOS“, die App in den Programme-Ordner ziehen und einmal öffnen.
+2. `./start.sh` starten. Das Skript startet Ollama und lädt beim ersten Mal das Modell aus `config.py` (`OLLAMA_MODEL`, Standard `gemma3:4b`, ca. 3,3 GB).
+
+Ollama wird automatisch bevorzugt, sobald es läuft; Gemini/Groq springen nur noch ein, wenn Ollama nicht verfügbar ist. Mit 16 GB RAM liefert `gemma3:12b` deutlich bessere Bewertungen. Ein lokales Modell ist langsamer und weniger treffsicher als die Cloud-Modelle; das Backend rechnet pro Durchlauf maximal 20 Minuten und gibt Trigger-Kandidaten Vorrang.
+
 ## KI-Key
 
 Gemini-Key kostenlos unter https://aistudio.google.com/apikey, Groq unter https://console.groq.com/keys. Entweder in `config.py` bei `GEMINI_API_KEY` eintragen oder (besser) `.env.example` nach `.env` kopieren und dort setzen. Ohne Key läuft das System regelbasiert (Schlagwort-Scoring, eingebauter Gazetteer für Geotagging); diese Einträge werden automatisch per KI nachveredelt, sobald ein Key da ist.
