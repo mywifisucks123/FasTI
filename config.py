@@ -20,8 +20,11 @@ AI_PROVIDERS = [p.strip() for p in os.environ.get("AI_PROVIDER", "gemini,groq").
 
 # Key holen: https://aistudio.google.com/apikey
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "DEIN_KEY_HIER")
-# Werden der Reihe nach probiert, wenn ein Modell fehlt oder überlastet ist (503).
-GEMINI_MODELS = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite", "gemini-flash-lite-latest"]
+# Bevorzugte Modelle in dieser Reihenfolge. Das Backend fragt bei Google ab, welche
+# Modelle dein Key tatsächlich nutzen kann, überspringt nicht vorhandene und hängt
+# weitere verfügbare Flash-Modelle als Reserve an (bei Überlastung/503).
+# "gemini-flash-latest" zeigt immer auf das aktuelle Flash-Modell (z. B. 3.8 Flash).
+GEMINI_MODELS = ["gemini-flash-latest", "gemini-flash-lite-latest"]
 # 0 = "Thinking" aus (schneller, spart Free-Tier-Kontingent). None = Modell-Default.
 GEMINI_THINKING_BUDGET = 0
 

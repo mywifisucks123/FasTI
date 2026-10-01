@@ -1039,6 +1039,36 @@ class AIClient:
         self.key = config.GEMINI_API_KEY if provider == "gemini" else config.GROQ_API_KEY
         self.thinking = config.GEMINI_THINKING_BUDGET
         self.interval = config.AI_MIN_SECONDS_BETWEEN_CALLS.get(provider, 10.0)
+        if provider == "gemini":
+            self.models = self._discover_gemini(self.models)
+
+    def _discover_gemini(self, preferred: list[str]) -> list[str]:
+        """Fragt die für den Key verfügbaren Modelle ab: bevorzugte zuerst, weitere Flash-Modelle als Reserve."""
+        try:
+            resp = requests.get("https://generativelanguage.googleapis.com/v1beta/models", params={"pageSize": 1000},
+                                headers={"x-goog-api-key": self.key}, timeout=config.REQUEST_TIMEOUT)
+            resp.raise_for_status()
+            listed = [m for m in resp.json().get("models", [])
+                      if "generateContent" in (m.get("supportedGenerationMethods") or [])]
+        except (requests.RequestException, ValueError) as exc:
+            log.debug("Gemini-Modellliste nicht abrufbar: %s", exc)
+            return preferred
+        names = [str(m.get("name", "")).replace("models/", "") for m in listed]
+        if not names:
+            return preferred
+        skip = re.compile(r"image|tts|audio|live|embed|vision|learnlm|robotics|computer|exp|preview", re.IGNORECASE)
+
+        def version(n: str) -> tuple:
+            m = re.search(r"gemini-(\d+(?:\.\d+)?)", n)
+            return (float(m.group(1)) if m else 0.0, "lite" not in n)
+        reserve = sorted((n for n in names if "flash" in n and not skip.search(n) and n not in preferred),
+                         key=version, reverse=True)
+        available = [m for m in preferred if m in names] + reserve
+        missing = [m for m in preferred if m not in names]
+        if missing:
+            log.info("Gemini: %s für diesen Key nicht verfügbar, übersprungen.", ", ".join(missing))
+        log.info("Gemini-Modelle: %s", ", ".join(available[:4]) + (" …" if len(available) > 4 else ""))
+        return available or preferred
 
     def budget_left(self) -> bool:
         today = now_utc().strftime("%Y-%m-%d")
@@ -1103,7 +1133,7 @@ class AIClient:
                     self.thinking = None  # Modell unterstützt thinkingConfig nicht
                     continue
                 if status == 404 or (status == 400 and "model" in body.lower() and "not" in body.lower()):
-                    log.warning("Modell %s nicht verfügbar, nächstes Modell …", model)
+                    log.info("Modell %s nicht verfügbar, nehme das nächste.", model)
                     break
                 if status in (401, 403):
                     raise AIUnavailable(f"API-Key ungültig oder gesperrt ({status})")
