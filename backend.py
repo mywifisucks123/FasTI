@@ -90,9 +90,14 @@ def clean_text(value: str | None, limit: int = 0) -> str:
 SENT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-ZÄÖÜ0-9\"'„(])")
 
 
+FEED_NOISE_RE = re.compile(
+    r"\[(?:\.\.\.|…|&#8230;)\]|\s*(?:The post|Der Beitrag) .{0,200}? (?:appeared first on|erschien zuerst auf) .*$|"
+    r"\s*(?:Continue reading|Read more|Weiterlesen)\b.*$", re.IGNORECASE)
+
+
 def two_sentences(text: str) -> str:
     """Kürzt auf maximal zwei Sätze."""
-    text = clean_text(text)
+    text = FEED_NOISE_RE.sub("", clean_text(text)).strip()
     if not text:
         return ""
     parts = [p.strip() for p in SENT_RE.split(text) if p.strip()]
@@ -860,9 +865,12 @@ def fetch_nina(feed: dict) -> list[dict]:
         if lat is None:
             lat, lon = 51.17, 10.45
         item = base_item(feed, f"nina-{wid}", title, f"https://warnung.bund.de/meldungen/{wid}/", desc or title, published)
-        first = two_sentences(desc).split(". ")[0].rstrip(".") if desc else ""
-        second = two_sentences(instruction).split(". ")[0].rstrip(".") if instruction else ""
-        summary = f"{title}{' – ' + area if area else ''}. {first or second or 'Details in der Originalmeldung'}."
+        # Beschreibung beginnt oft mit der Überschrift → abschneiden
+        body = desc[len(title):].lstrip(" .:-–") if desc.startswith(title) else desc
+        sents = [x for x in SENT_RE.split(two_sentences(body)) if x] if body else []
+        if instruction:
+            sents.append(two_sentences(instruction).split(". ")[0].rstrip(".") + ".")
+        summary = " ".join(sents[:2]) or f"{title}{' – ' + area if area else ''}. Details in der Originalmeldung."
         item["threat"] = build_threat(item, {
             "title": title, "category": "natural" if cap_cat in NINA_NATURAL else "infrastructure",
             "severity_score": sev, "location_name": f"{area or 'Deutschland'}"[:120], "country_code": "DE",

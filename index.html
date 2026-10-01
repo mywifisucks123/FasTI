@@ -25,6 +25,8 @@
   /* Karte */
   #map { background: #0b1018; }
   .leaflet-container { font: inherit; }
+  .osm-dark .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.3); }
+  .leaflet-overlay-pane img.leaflet-tile { pointer-events: none; }
   .leaflet-control-attribution { background: rgba(10,14,21,.75) !important; color: #6b7a8f !important; font-size: 10px; }
   .leaflet-control-attribution a { color: #8aa0b8 !important; }
   .leaflet-bar a { background: #121a26; color: #cbd5e1; border-color: #1e2938; }
@@ -215,10 +217,24 @@ const hasGeo = (t) => Number.isFinite(t.latitude) && Number.isFinite(t.longitude
 /* ---------- Karte ---------- */
 const map = L.map("map", { zoomControl: true, worldCopyJump: true, minZoom: 2, maxZoom: 12, attributionControl: true })
   .setView([30, 15], 2);
-L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-  subdomains: "abcd", maxZoom: 19,
-  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+// Basiskarte: Esri Dark Gray (kostenlos, ohne Key). Liefert Esri keine Kacheln,
+// wird automatisch auf abgedunkelte OpenStreetMap-Kacheln umgeschaltet.
+const ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/";
+const baseLayer = L.tileLayer(ESRI + "World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}", {
+  maxZoom: 16, attribution: 'Tiles &copy; <a href="https://www.esri.com">Esri</a> &mdash; Esri, HERE, Garmin, &copy; OpenStreetMap',
 }).addTo(map);
+const labelLayer = L.tileLayer(ESRI + "World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}", { maxZoom: 16, pane: "overlayPane", opacity: 0.85 }).addTo(map);
+let tileErrors = 0, tileLoaded = false, switched = false;
+baseLayer.on("tileload", () => { tileLoaded = true; });
+baseLayer.on("tileerror", () => {
+  if (switched || tileLoaded || ++tileErrors < 4) return;
+  switched = true;
+  map.removeLayer(baseLayer); map.removeLayer(labelLayer);
+  document.getElementById("map").classList.add("osm-dark");
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  }).addTo(map);
+});
 const markerLayer = L.layerGroup().addTo(map);
 const markers = new Map();
 let fittedOnce = false;
