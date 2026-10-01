@@ -7,3 +7,4 @@ server.log
 .backend.lock
 .env
 .DS_Store
+keys.py

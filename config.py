@@ -25,7 +25,7 @@ AI_PROVIDERS = [p.strip() for p in os.environ.get("AI_PROVIDER", "ollama,gemini,
 #   Mac mit 16 GB RAM: "gemma3:12b" (ca. 8 GB, deutlich bessere Bewertungen, langsamer)
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma3:4b")
 OLLAMA_URL = "http://localhost:11434"
-OLLAMA_BATCH_SIZE = 4             # kleine Pakete, damit das Modell nicht den Faden verliert
+OLLAMA_BATCH_SIZE = 1             # eine Meldung je Anfrage – kleine Modelle verwechseln sonst Meldungen
 OLLAMA_NUM_CTX = 8192             # Kontextfenster (Prompt + Antwort)
 OLLAMA_TIMEOUT = 900              # Sekunden je Anfrage
 OLLAMA_MAX_MINUTES_PER_RUN = 20   # Rechenzeit pro Durchlauf (Intervall ist 30 Min.)
@@ -104,7 +104,8 @@ def gnews(query: str, lang: str = "de") -> str:
 # BBC, Al Jazeera, DW, Tagesschau und UN News.
 FEEDS = [
     # --- Cyber -------------------------------------------------------------
-    {"name": "CISA Advisories", "url": "https://www.cisa.gov/cybersecurity-advisories/all.xml",
+    # cisa.gov blockt automatisierte Abrufe (403) → über Google News
+    {"name": "CISA Advisories", "url": gnews("site:cisa.gov advisory OR alert OR KEV", "en"),
      "category": "cyber", "type": "rss"},
     {"name": "BleepingComputer", "url": "https://www.bleepingcomputer.com/feed/",
      "category": "cyber", "type": "rss"},
@@ -130,7 +131,7 @@ FEEDS = [
      "category": "geopolitics", "type": "rss", "filter": True},
     {"name": "Bellingcat (OSINT)", "url": "https://www.bellingcat.com/feed/",
      "category": "geopolitics", "type": "rss"},
-    {"name": "NATO News", "url": "https://www.nato.int/cps/rss/en/natohq/rssFeed.xsl/rssFeed.xml",
+    {"name": "NATO News", "url": gnews("site:nato.int", "en"),
      "category": "geopolitics", "type": "rss"},
     {"name": "Bundestag hib", "url": "https://www.bundestag.de/static/appdata/includes/rss/hib.rss",
      "category": "geopolitics", "type": "rss", "filter": True},
@@ -194,7 +195,7 @@ FEEDS = [
      "category": "natural", "type": "rss"},
 
     # --- Infrastruktur, Bevölkerungsschutz & Supply Chain ------------------
-    {"name": "BSI Aktuelles", "url": "https://www.bsi.bund.de/SiteGlobals/Functions/RSSFeed/RSSNewsfeed/RSSNewsfeed.xml",
+    {"name": "BSI Aktuelles", "url": gnews("site:bsi.bund.de"),
      "category": "infrastructure", "type": "rss"},
     {"name": "NINA MoWaS (BBK)", "url": "https://warnung.bund.de/api31/mowas/mapData.json",
      "category": "infrastructure", "type": "nina"},
@@ -311,3 +312,13 @@ TRIGGERS = [
            "Deutschland, Polen, Litauen, Lettland oder Estland.",
      "match": [r"travel advi|reisehinweis|reisewarnung|sicherheitshinweis|level [34]", _DE_PL_BALT]},
 ]
+
+
+# ---------------------------------------------------------------------------
+# Eigene Keys und Einstellungen aus keys.py (optional, wird bei Updates nicht
+# ersetzt) – überschreiben alle Werte oben.
+# ---------------------------------------------------------------------------
+try:
+    from keys import *  # noqa: F401,F403
+except ImportError:
+    pass

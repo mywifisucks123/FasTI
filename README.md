@@ -18,6 +18,10 @@ Optionen: `--no-ai`, `--no-loop`, `--port 8080`.
 1. Ollama installieren: https://ollama.com/download → „Download for macOS“, die App in den Programme-Ordner ziehen und einmal öffnen.
 2. `./start.sh` starten. Das Skript startet Ollama und lädt beim ersten Mal das Modell aus `config.py` (`OLLAMA_MODEL`, Standard `gemma3:4b`, ca. 3,3 GB).
 
+Kleine lokale Modelle bekommen Leitplanken: Trigger zählen nur, wenn KI und Regeln übereinstimmen; eindeutige Kategorien kommen aus Schlagwortregeln; die Severity wird mit der Regelbewertung gemittelt; jede Meldung wird einzeln analysiert.
+
+Eigene Keys und Einstellungen gehören in `keys.py` (wird bei Updates nicht ersetzt und überschreibt `config.py`).
+
 Ollama wird automatisch bevorzugt, sobald es läuft; Gemini/Groq springen nur noch ein, wenn Ollama nicht verfügbar ist. Mit 16 GB RAM liefert `gemma3:12b` deutlich bessere Bewertungen. Ein lokales Modell ist langsamer und weniger treffsicher als die Cloud-Modelle; das Backend rechnet pro Durchlauf maximal 20 Minuten und gibt Trigger-Kandidaten Vorrang.
 
 ## KI-Key

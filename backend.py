@@ -613,6 +613,38 @@ def analyze_heuristic(item: dict) -> dict | None:
     }, "heuristic")
 
 
+def harden_local(item: dict, res: dict) -> dict:
+    """Leitplanken für kleine lokale Modelle: feste Regeln haben bei Triggern, Kategorie und Relevanz Vorrang."""
+    title, text = item["title"], item.get("text", "")
+    if res.get("relevant") is False:
+        return res
+    if item.get("filter") and not RELEVANCE_RE.search(f"{title} {text}"):
+        return {**res, "relevant": False}
+    res = dict(res)
+    # Trigger nur, wenn KI UND Regeln übereinstimmen
+    rule_hits = set(detect_triggers(title, text))
+    res["triggers"] = [t for t in clean_triggers(res.get("triggers")) if t in rule_hits]
+    # Eindeutige Kategorie-Signale im Titel schlagen das Modell; sonst muss die
+    # Modell-Kategorie durch Schlagwörter im Text gedeckt sein
+    clean_title, clean_text_ = ACTOR_RE.sub(" ", title), ACTOR_RE.sub(" ", text)
+    hints = dict(CATEGORY_HINTS)
+    cat = str(res.get("category", "")).lower()
+    title_cat = next((c for c, rx in CATEGORY_HINTS if rx.search(clean_title)), None)
+    if title_cat:
+        cat = title_cat
+    elif cat not in CATEGORIES or (cat in hints and not hints[cat].search(f"{clean_title} {clean_text_}")):
+        cat = guess_category(title, text, item.get("feed_category", "geopolitics"))
+    res["category"] = cat
+    # Severity mit der Regelbewertung mitteln (kleine Modelle übertreiben gern)
+    try:
+        ai_sev = float(res.get("severity_score", 3))
+    except (TypeError, ValueError):
+        ai_sev = 3.0
+    rule_sev = heuristic_severity(title, text, res["category"])
+    res["severity_score"] = int(round((ai_sev + rule_sev) / 2))
+    return res
+
+
 def build_threat(item: dict, fields: dict, analysis: str) -> dict:
     """Normalisiert und validiert einen Datensatz für threats.json."""
     category = str(fields.get("category", "")).lower().strip()
@@ -1227,7 +1259,7 @@ class AIClient:
 
 OLLAMA_URL = getattr(config, "OLLAMA_URL", "http://localhost:11434").rstrip("/")
 OLLAMA_MODEL = getattr(config, "OLLAMA_MODEL", "gemma3:4b")
-OLLAMA_BATCH_SIZE = getattr(config, "OLLAMA_BATCH_SIZE", 4)
+OLLAMA_BATCH_SIZE = getattr(config, "OLLAMA_BATCH_SIZE", 1)
 OLLAMA_NUM_CTX = getattr(config, "OLLAMA_NUM_CTX", 8192)
 OLLAMA_TIMEOUT = getattr(config, "OLLAMA_TIMEOUT", 900)
 OLLAMA_MAX_MINUTES_PER_RUN = getattr(config, "OLLAMA_MAX_MINUTES_PER_RUN", 20)
@@ -1292,6 +1324,9 @@ class AIPool:
             client = self.clients[0]
             try:
                 res = client.analyze(batch)
+                if client.local:
+                    for r in res.values():
+                        r["_local"] = True
                 self.status.update({"active": True, "provider": client.provider, "model": client.model,
                                     "last_success": iso(now_utc()), "last_error": ""})
                 self.status["run_calls"] += 1
@@ -1423,6 +1458,8 @@ def run_once(use_ai: bool = True) -> None:
         for item in batch:
             res = results_ai.get(item["id"])
             if res is not None:
+                if res.get("_local"):
+                    res = harden_local(item, res)
                 if res.get("relevant") is False:
                     dropped += 1
                     db["seen_ids"][item["id"]] = stamp
@@ -1473,6 +1510,8 @@ def upgrade_heuristic(db: dict, ai: AIPool, feeds_status: list[dict], provider: 
             if r is None:
                 continue
             old = by_id[item["id"]]
+            if r.get("_local"):
+                r = harden_local(item, r)
             if r.get("relevant") is False:
                 db["threats"] = [t for t in db["threats"] if t["id"] != old["id"]]
             else:
