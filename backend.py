@@ -557,6 +557,39 @@ def guess_category(title: str, text: str, default: str) -> str:
     return default if default in CATEGORIES else "geopolitics"
 
 
+# ===========================================================================
+# Trigger-Erkennung (Krisen-Entscheidungsplan, Katalog in config.TRIGGERS)
+# ===========================================================================
+def _wordstart(pattern: str) -> re.Pattern:
+    # Muster nur an Wortanfängen erlauben ("riga" soll nicht in "Brigade" treffen)
+    return re.compile(r"(?<![a-zäöüß0-9])(?:" + pattern + ")", re.IGNORECASE)
+
+
+TRIGGER_DEFS = {t["id"]: t for t in config.TRIGGERS}
+TRIGGER_RULES = [(t["id"], [_wordstart(p) for p in t.get("match", [])],
+                  _wordstart(t["exclude"]) if t.get("exclude") else None) for t in config.TRIGGERS]
+
+
+def detect_triggers(title: str, text: str) -> list[str]:
+    content = f"{title} {text}"
+    hits = []
+    for tid, patterns, exclude in TRIGGER_RULES:
+        if patterns and all(p.search(content) for p in patterns) and not (exclude and exclude.search(content)):
+            hits.append(tid)
+    return hits
+
+
+def clean_triggers(values) -> list[str]:
+    if not isinstance(values, list):
+        values = [values] if values else []
+    out = []
+    for v in values:
+        tid = str(v).strip().upper()[:3]
+        if tid in TRIGGER_DEFS and tid not in out:
+            out.append(tid)
+    return sorted(out)
+
+
 def analyze_heuristic(item: dict) -> dict | None:
     title, text = item["title"], item["text"]
     if item.get("filter") and not RELEVANCE_RE.search(f"{title} {text}"):
@@ -575,6 +608,7 @@ def analyze_heuristic(item: dict) -> dict | None:
         "severity_score": heuristic_severity(title, text, category),
         "impact_summary": summary,
         "entities": extract_entities(title, text, geo.get("country_code", "")),
+        "triggers": detect_triggers(title, text),
         **geo,
     }, "heuristic")
 
@@ -607,6 +641,9 @@ def build_threat(item: dict, fields: dict, analysis: str) -> dict:
     entities = fields.get("entities") or []
     if not isinstance(entities, list):
         entities = [entities]
+    triggers = clean_triggers(fields.get("triggers"))
+    if any(TRIGGER_DEFS[t]["list"] == "A" for t in triggers):
+        severity = max(severity, 8)
     return {
         "id": item["id"],
         "title": clean_text(str(fields.get("title") or item["title"]), 220) or item["title"],
@@ -619,6 +656,7 @@ def build_threat(item: dict, fields: dict, analysis: str) -> dict:
         "longitude": lon,
         "impact_summary": two_sentences(str(fields.get("impact_summary") or "")) or two_sentences(item["text"]),
         "entities": dedupe_list(entities)[:10],
+        "triggers": triggers,
         "source_url": safe_url(item.get("link")),
         "source_name": item["feed_name"],
         "timestamp": item["published"],
@@ -783,28 +821,56 @@ def fetch_aa(feed: dict) -> list[dict]:
                  ("situationWarning", "einen Sicherheitshinweis zur Lage", 6),
                  ("situationPartWarning", "einen regionalen Sicherheitshinweis", 5)]
         active = [(label, sev) for flag, label, sev in flags if c.get(flag)]
-        if not active:
+        cc = str(c.get("countryCode", "")).upper()
+        watched = cc in config.AA_WATCH_COUNTRIES
+        if not active and not watched:
             continue
         ts = to_float(c.get("lastModified")) or 0
         published = datetime.fromtimestamp(ts / 1000 if ts > 1e12 else ts, tz=timezone.utc) if ts else now_utc()
         if published < cutoff:
             continue
-        cc = str(c.get("countryCode", "")).upper()
         name = c.get("countryName") or GAZ_ISO.get(cc, ("", "", cc))[2]
         title = c.get("title") or f"{name}: Reise- und Sicherheitshinweise"
         link = f"https://www.auswaertiges-amt.de/opendata/travelwarning/{key}"
         item = base_item(feed, f"aa-{key}-{int(ts)}", title, link, title, published)
         geo = GAZ_ISO.get(cc)
-        label, sev = active[0]
+        date_de = published.strftime("%d.%m.%Y")
+        label, sev = active[0] if active else ("keine Reisewarnung", 2)
         summary = (f"Das Auswärtige Amt führt für {name} aktuell {label}. "
-                   f"Die Reise- und Sicherheitshinweise wurden am {published.strftime('%d.%m.%Y')} aktualisiert.")
+                   f"Die Reise- und Sicherheitshinweise wurden am {date_de} aktualisiert.")
+        triggers, ents = [], [cc, "Auswärtiges Amt"] + (["Reisewarnung"] if active else [])
+        if watched:
+            # Beobachtetes Nachbarland: Volltext auf Ausreiseaufruf prüfen (Trigger A8)
+            content = ""
+            try:
+                detail = http_get(f"{feed['url']}/{key}").json()
+                node = detail.get("response", detail)
+                node = node.get(key, node) if isinstance(node, dict) else {}
+                content = clean_text(str(node.get("content", "")))
+            except (requests.RequestException, ValueError, AttributeError) as exc:
+                log.debug("AA-Details %s: %s", cc, exc)
+            if AA_DEPARTURE_RE.search(content):
+                triggers, sev = ["A8"], 9
+                summary = (f"Das Auswärtige Amt fordert Deutsche zur Ausreise aus {name} auf (Stand {date_de}). "
+                           f"Trigger A8 des Krisenplans prüfen: gilt erst bei Aufrufen für mehrere Nachbarstaaten.")
+            else:
+                triggers = ["D3"] if active else []
+                summary = (f"Das Auswärtige Amt hat die Reise- und Sicherheitshinweise für {name} am {date_de} "
+                           f"aktualisiert. Aktueller Status: {label}; kein Ausreiseaufruf im Text erkannt.")
+            ents.append("Nachbarstaat")
         item["threat"] = build_threat(item, {
             "title": f"Auswärtiges Amt: {title}", "category": "geopolitics", "severity_score": sev,
             "location_name": name, "country_code": cc,
             "latitude": geo[3] if geo else None, "longitude": geo[4] if geo else None,
-            "impact_summary": summary, "entities": [cc, "Reisewarnung", "Auswärtiges Amt"]}, "structured")
+            "impact_summary": summary, "entities": ents, "triggers": triggers}, "structured")
         items.append(item)
     return items
+
+
+AA_DEPARTURE_RE = re.compile(
+    r"(aufgefordert|dringend gebeten|wird dringend geraten|dringend empfohlen).{0,120}(auszureisen|ausreisen|zu verlassen|ausreise)|"
+    r"ausreiseaufforderung|zur ausreise aufgefordert|(sofort|umgehend|unverzüglich).{0,40}(auszureisen|zu verlassen)",
+    re.IGNORECASE)
 
 
 NINA_SEVERITY = {"extreme": 9, "severe": 7, "moderate": 5, "minor": 3}
@@ -920,7 +986,8 @@ Antwortformat (exakt dieses JSON-Objekt, keine Erklärungen, kein Markdown):
   "latitude": 0.0,
   "longitude": 0.0,
   "impact_summary": "<GENAU 2 Sätze auf {lang}>",
-  "entities": ["..."]
+  "entities": ["..."],
+  "triggers": []
 }}]}}
 
 Regeln:
@@ -945,9 +1012,17 @@ Bei Cyber-Vorfällen: Sitz des Hauptbetroffenen, sonst null.
 konkreten Auswirkungen sind zu erwarten. Keine Spekulation über den Quelltext hinaus.
 - entities: 3–8 Tags: Akteure (Staaten, Gruppen, APTs, Unternehmen), ISO-Ländercodes, CVE-IDs, Malware, Produkte, \
 betroffene Sektoren (z. B. Energie, Gesundheit, Finanzen, Transport, Telekommunikation, Behörden).
+- triggers: IDs aus dem Trigger-Katalog unten, aber NUR wenn die Meldung das Ereignis als tatsächlich eingetreten berichtet. Ausdrücklich KEINE Trigger: Politikerzitate und Interviews, Forderungen, Spekulationen, Übungen und Manöver, Rüstungsplanung, Wehrdienst- und Wehrpflichtdebatten, Umfragen, Social-Media-Wellen, historische Rückblicke. Einzelne Sabotageakte dürfen B1 erhalten (die Häufung wird separat gezählt). Im Zweifel leere Liste.
+  Bei einem A-Trigger: severity_score mindestens 8.
+
+Trigger-Katalog:
+{triggers}
 
 Meldungen:
 {items}"""
+
+
+TRIGGER_PROMPT = "\n".join(f"  {t['id']} (Liste {t['list']}): {t['ai']}" for t in config.TRIGGERS)
 
 
 class AIUnavailable(Exception):
@@ -955,26 +1030,15 @@ class AIUnavailable(Exception):
 
 
 class AIClient:
-    def __init__(self, provider: str, usage: dict):
+    def __init__(self, provider: str, usage_root: dict):
         self.provider = provider
-        self.usage = usage
+        self.usage = usage_root.setdefault(provider, {})
         self.calls_this_run = 0
         self.last_call = 0.0
         self.models = list(config.GEMINI_MODELS if provider == "gemini" else config.GROQ_MODELS)
         self.key = config.GEMINI_API_KEY if provider == "gemini" else config.GROQ_API_KEY
         self.thinking = config.GEMINI_THINKING_BUDGET
         self.interval = config.AI_MIN_SECONDS_BETWEEN_CALLS.get(provider, 10.0)
-
-    @staticmethod
-    def from_config(usage: dict, disabled: bool = False) -> "AIClient | None":
-        provider = str(config.AI_PROVIDER).lower().strip()
-        if disabled or provider not in ("gemini", "groq"):
-            return None
-        key = config.GEMINI_API_KEY if provider == "gemini" else config.GROQ_API_KEY
-        if not key or key.strip() in ("", "DEIN_KEY_HIER"):
-            log.warning("Kein %s-API-Key gesetzt – regelbasierte Analyse aktiv.", provider.capitalize())
-            return None
-        return AIClient(provider, usage)
 
     def budget_left(self) -> bool:
         today = now_utc().strftime("%Y-%m-%d")
@@ -988,7 +1052,8 @@ class AIClient:
         payload = [{"id": str(i), "source": it["feed_name"], "source_category": it["feed_category"],
                     "published": it["published"], "title": it["title"], "text": it["text"][:1200]}
                    for i, it in enumerate(batch)]
-        prompt = USER_PROMPT.format(lang=config.OUTPUT_LANGUAGE, items=json.dumps(payload, ensure_ascii=False, indent=1))
+        prompt = USER_PROMPT.format(lang=config.OUTPUT_LANGUAGE, triggers=TRIGGER_PROMPT,
+                                    items=json.dumps(payload, ensure_ascii=False, indent=1))
         wait = self.interval - (time.time() - self.last_call)
         if wait > 0:
             time.sleep(wait)
@@ -1050,13 +1115,20 @@ class AIClient:
                     time.sleep(min(retry, 60))
                     continue
                 if status >= 500:
-                    time.sleep(5 * (attempt + 1))
+                    if attempt >= 1:  # überlastet → nächstes Modell statt endlos warten
+                        log.warning("Modell %s überlastet (HTTP %d), nächstes Modell …", model, status)
+                        break
+                    time.sleep(8)
                     continue
                 raise AIUnavailable(last_error)
             else:
-                raise AIUnavailable(last_error)
+                log.warning("Modell %s: %s", model, last_error[:120])
             self.models.pop(0)
         raise AIUnavailable(f"Kein Modell verfügbar ({last_error})")
+
+    @property
+    def model(self) -> str:
+        return self.models[0] if self.models else ""
 
     def _gemini(self, model: str, prompt: str) -> requests.Response:
         gen_cfg: dict = {"temperature": 0.2, "responseMimeType": "application/json", "maxOutputTokens": 8192}
@@ -1085,6 +1157,55 @@ class AIClient:
         return data["choices"][0]["message"]["content"]
 
 
+def _has_key(provider: str) -> bool:
+    key = config.GEMINI_API_KEY if provider == "gemini" else config.GROQ_API_KEY
+    return bool(key) and key.strip() not in ("", "DEIN_KEY_HIER")
+
+
+class AIPool:
+    """Kette von KI-Anbietern: fällt einer aus, übernimmt der nächste mit gültigem Key."""
+
+    def __init__(self, usage_root: dict, status: dict, disabled: bool = False):
+        if "date" in usage_root:  # altes Format (ein Zähler für alles)
+            usage_root.clear()
+        providers = [] if disabled else [p.lower() for p in getattr(config, "AI_PROVIDERS", [getattr(config, "AI_PROVIDER", "gemini")])]
+        self.clients = [AIClient(p, usage_root) for p in providers if p in ("gemini", "groq") and _has_key(p)]
+        self.status = status
+        status.update({"configured": [c.provider for c in self.clients], "run_calls": 0, "run_items": 0})
+        if not self.clients and not disabled:
+            log.warning("Kein gültiger KI-API-Key gesetzt – regelbasierte Analyse aktiv.")
+            status.update({"active": False, "last_error": "Kein API-Key hinterlegt"})
+        elif disabled:
+            status.update({"active": False, "last_error": "KI per --no-ai deaktiviert"})
+
+    def __bool__(self) -> bool:
+        return bool(self.clients)
+
+    @property
+    def label(self) -> str:
+        return self.clients[0].provider if self.clients else "none"
+
+    def budget_left(self) -> bool:
+        return bool(self.clients) and self.clients[0].budget_left()
+
+    def analyze(self, batch: list[dict]) -> dict[str, dict]:
+        while self.clients:
+            client = self.clients[0]
+            try:
+                res = client.analyze(batch)
+                self.status.update({"active": True, "provider": client.provider, "model": client.model,
+                                    "last_success": iso(now_utc()), "last_error": ""})
+                self.status["run_calls"] += 1
+                self.status["run_items"] += len(res)
+                return res
+            except AIUnavailable as exc:
+                log.warning("KI %s nicht verfügbar: %s", client.provider, exc)
+                self.status.update({"active": False, "last_error": f"{client.provider}: {str(exc)[:160]}",
+                                    "last_error_at": iso(now_utc())})
+                self.clients.pop(0)
+        raise AIUnavailable(self.status.get("last_error") or "keine KI verfügbar")
+
+
 # ===========================================================================
 # Persistenz
 # ===========================================================================
@@ -1095,25 +1216,36 @@ def load_db() -> dict:
         if isinstance(db, dict) and isinstance(db.get("threats"), list):
             db.setdefault("seen_ids", {})
             db.setdefault("ai_usage", {})
+            db.setdefault("ai_status", {})
             return db
     except FileNotFoundError:
         pass
     except (OSError, json.JSONDecodeError) as exc:
         log.warning("%s nicht lesbar (%s) – starte neu.", config.OUTPUT_FILE, exc)
-    return {"threats": [], "seen_ids": {}, "ai_usage": {}}
+    return {"threats": [], "seen_ids": {}, "ai_usage": {}, "ai_status": {}}
 
 
 def save_db(db: dict, feeds_status: list[dict], provider: str) -> None:
     cutoff = now_utc() - timedelta(days=config.RETENTION_DAYS)
-    threats = [t for t in db["threats"] if (parse_iso(t.get("timestamp")) or now_utc()) >= cutoff]
+    trig_cutoff = now_utc() - timedelta(days=config.TRIGGER_RETENTION_DAYS)
+
+    def keep(t: dict) -> bool:
+        ts = parse_iso(t.get("timestamp")) or now_utc()
+        return ts >= (trig_cutoff if t.get("triggers") else cutoff)
+    threats = [t for t in db["threats"] if keep(t)]
     threats.sort(key=lambda t: t.get("timestamp", ""), reverse=True)
-    threats = threats[: config.MAX_STORED_THREATS]
-    seen = {k: v for k, v in db["seen_ids"].items() if (parse_iso(v) or now_utc()) >= cutoff}
+    # Trigger-Treffer haben Vorrang vor dem Mengenlimit
+    flagged = [t for t in threats if t.get("triggers")]
+    others = [t for t in threats if not t.get("triggers")][: max(0, config.MAX_STORED_THREATS - len(flagged))]
+    threats = sorted(flagged + others, key=lambda t: t.get("timestamp", ""), reverse=True)
+    seen = {k: v for k, v in db["seen_ids"].items() if (parse_iso(v) or now_utc()) >= trig_cutoff}
     counts = {c: sum(1 for t in threats if t["category"] == c) for c in CATEGORIES}
     out = {
         "schema_version": SCHEMA_VERSION,
         "generated_at": iso(now_utc()),
         "ai_provider": provider,
+        "ai_status": db.get("ai_status", {}),
+        "triggers": [{"id": t["id"], "list": t["list"], "label": t["label"]} for t in config.TRIGGERS],
         "poll_interval_minutes": config.POLL_INTERVAL_MINUTES,
         "stats": {"total": len(threats), "by_category": counts,
                   "critical": sum(1 for t in threats if t["severity_score"] >= 8),
@@ -1138,8 +1270,8 @@ def run_once(use_ai: bool = True) -> None:
     db = load_db()
     known = {t["id"] for t in db["threats"]} | set(db["seen_ids"])
     known_titles = {norm_title(t.get("source_title") or t["title"]) for t in db["threats"]}
-    ai = AIClient.from_config(db["ai_usage"], disabled=not use_ai)
-    provider = ai.provider if ai else "none"
+    ai = AIPool(db["ai_usage"], db["ai_status"], disabled=not use_ai)
+    provider = ai.label
 
     log.info("Rufe %d Quellen ab …", len(config.FEEDS))
     with ThreadPoolExecutor(max_workers=8) as pool:
@@ -1168,8 +1300,12 @@ def run_once(use_ai: bool = True) -> None:
     if structured:
         save_db(db, feeds_status, provider)
 
-    # Wichtigste Meldungen zuerst an die KI
-    pending.sort(key=lambda i: heuristic_severity(i["title"], i["text"], i["feed_category"]), reverse=True)
+    # Trigger-Kandidaten und wichtigste Meldungen zuerst an die KI
+    def priority(i: dict) -> tuple:
+        trig = detect_triggers(i["title"], i["text"])
+        return (any(t.startswith("A") for t in trig), bool(trig),
+                heuristic_severity(i["title"], i["text"], i["feed_category"]))
+    pending.sort(key=priority, reverse=True)
     added = dropped = deferred = 0
     queue = list(pending)
     while queue:
@@ -1178,11 +1314,10 @@ def run_once(use_ai: bool = True) -> None:
         if ai and ai.budget_left():
             try:
                 results_ai = ai.analyze(batch)
-                log.info("KI-Analyse: %d/%d Einträge (%s, Aufruf %d heute)", len(results_ai), len(batch),
-                         ai.models[0] if ai.models else ai.provider, ai.usage.get("calls", 0))
-            except AIUnavailable as exc:
-                log.warning("KI nicht verfügbar: %s – Rest dieses Laufs ohne KI.", exc)
-                ai = None
+                log.info("KI-Analyse: %d/%d Einträge (%s/%s)", len(results_ai), len(batch),
+                         ai.status.get("provider"), ai.status.get("model"))
+            except AIUnavailable:
+                log.warning("Keine KI verfügbar – Rest dieses Laufs regelbasiert.")
             except (ValueError, KeyError, requests.RequestException) as exc:
                 log.warning("KI-Antwort unbrauchbar (%s) – Batch regelbasiert.", exc)
         for item in batch:
@@ -1214,12 +1349,12 @@ def run_once(use_ai: bool = True) -> None:
              upgraded, len(db["threats"]))
 
 
-def upgrade_heuristic(db: dict, ai: AIClient, feeds_status: list[dict], provider: str) -> int:
+def upgrade_heuristic(db: dict, ai: AIPool, feeds_status: list[dict], provider: str) -> int:
     """Verbleibendes KI-Kontingent nutzen, um regelbasierte Einträge der letzten 48 h nachzuveredeln."""
     cutoff = now_utc() - timedelta(hours=48)
     candidates = [t for t in db["threats"] if t.get("analysis") == "heuristic" and t.get("_excerpt")
                   and (parse_iso(t.get("timestamp")) or now_utc()) >= cutoff]
-    candidates.sort(key=lambda t: t["severity_score"], reverse=True)
+    candidates.sort(key=lambda t: (bool(t.get("triggers")), t["severity_score"]), reverse=True)
     upgraded = 0
     while candidates and ai.budget_left():
         chunk, candidates = candidates[: config.AI_BATCH_SIZE], candidates[config.AI_BATCH_SIZE:]
