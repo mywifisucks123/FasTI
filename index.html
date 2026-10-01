@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FasTI · Threat & Crisis Intelligence</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%230b0f17' stroke='%23ef4444' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23ef4444'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.3"></script>
+<style>
+  :root {
+    --bg: #0a0e15; --panel: #0f1520; --panel-2: #141c2a; --line: #1e2938; --text: #dbe3ee; --muted: #8494a8;
+    --crit: #ef4444; --high: #f59e0b; --low: #3b82f6; --accent: #22d3ee;
+    --cat-cyber: #a78bfa; --cat-geopolitics: #f472b6; --cat-natural: #34d399; --cat-infrastructure: #fbbf24;
+  }
+  html, body { background: var(--bg); color: var(--text); }
+  body { font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  ::-webkit-scrollbar { width: 8px; } ::-webkit-scrollbar-thumb { background: #243041; border-radius: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  /* Karte */
+  #map { background: #0b1018; }
+  .leaflet-container { font: inherit; }
+  .leaflet-control-attribution { background: rgba(10,14,21,.75) !important; color: #6b7a8f !important; font-size: 10px; }
+  .leaflet-control-attribution a { color: #8aa0b8 !important; }
+  .leaflet-bar a { background: #121a26; color: #cbd5e1; border-color: #1e2938; }
+  .leaflet-bar a:hover { background: #1a2433; color: #fff; }
+  .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: #111827; color: var(--text); border: 1px solid #263244; box-shadow: 0 12px 32px rgba(0,0,0,.55); }
+  .leaflet-popup-content { margin: 12px 14px; line-height: 1.45; font-size: 13px; }
+  .leaflet-container a.leaflet-popup-close-button { color: #8494a8; }
+
+  .pm { position: relative; width: 18px; height: 18px; }
+  .pm .core { position: absolute; inset: 4px; border-radius: 50%; background: var(--c); box-shadow: 0 0 10px var(--c); border: 1.5px solid rgba(255,255,255,.85); }
+  .pm .ring { position: absolute; inset: 0; border-radius: 50%; border: 2px solid var(--c); animation: pulse var(--d, 2s) ease-out infinite; }
+  .pm .ring.r2 { animation-delay: calc(var(--d, 2s) / 2); }
+  .pm.crit { --c: var(--crit); --d: 1.3s; } .pm.high { --c: var(--high); --d: 2s; } .pm.low { --c: var(--low); --d: 3s; }
+  .pm.crit .core { inset: 3px; }
+  .pm.sel .core { inset: 1px; border: 2px solid #fff; }
+  .pm.sel::after { content: ""; position: absolute; inset: -9px; border-radius: 50%; border: 2px dashed #fff; opacity: .8; animation: spin 6s linear infinite; }
+  @keyframes pulse { 0% { transform: scale(.6); opacity: .9; } 100% { transform: scale(2.8); opacity: 0; } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Severity & Kategorie */
+  .sev-crit { --s: var(--crit); } .sev-high { --s: var(--high); } .sev-low { --s: var(--low); }
+  .sev-pill { color: var(--s); background: color-mix(in srgb, var(--s) 14%, transparent); border: 1px solid color-mix(in srgb, var(--s) 45%, transparent); }
+  .sev-bar { background: var(--s); }
+  .cat-cyber { --k: var(--cat-cyber); } .cat-geopolitics { --k: var(--cat-geopolitics); }
+  .cat-natural { --k: var(--cat-natural); } .cat-infrastructure { --k: var(--cat-infrastructure); }
+  .cat-badge { color: var(--k); background: color-mix(in srgb, var(--k) 12%, transparent); border: 1px solid color-mix(in srgb, var(--k) 35%, transparent); }
+
+  /* Cards */
+  .card { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--s); transition: background .15s, box-shadow .2s, border-color .2s; }
+  .card:hover { background: var(--panel-2); }
+  .card.sel { background: #152033; border-color: color-mix(in srgb, var(--s) 70%, #fff 0%); box-shadow: 0 0 0 1px var(--s), 0 0 28px -6px var(--s); }
+  .card.flash { animation: flash 1.2s ease-out 1; }
+  @keyframes flash { 0% { box-shadow: 0 0 0 2px #fff, 0 0 30px var(--s); } 100% { box-shadow: 0 0 0 1px var(--s), 0 0 28px -6px var(--s); } }
+  .chip { background: #172133; border: 1px solid #233046; color: #b7c4d6; }
+  .chip.cve { background: rgba(239,68,68,.1); border-color: rgba(239,68,68,.35); color: #fca5a5; }
+  .chip.cc { background: rgba(34,211,238,.08); border-color: rgba(34,211,238,.3); color: #67e8f9; }
+
+  /* Filter */
+  .fbtn { border: 1px solid var(--line); background: #0f1520; color: #9fb0c4; transition: all .15s; }
+  .fbtn:hover { color: #fff; border-color: #334155; }
+  .fbtn.on { background: #e2e8f0; color: #0b0f17; border-color: #e2e8f0; }
+  .fbtn .cnt { opacity: .65; }
+  .kpi { background: linear-gradient(180deg, #111926, #0d131d); border: 1px solid var(--line); }
+  .live-dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 0 0 rgba(34,197,94,.7); animation: live 2s infinite; }
+  .live-dot.stale { background: #f59e0b; animation: none; } .live-dot.down { background: #ef4444; animation: none; }
+  @keyframes live { 70% { box-shadow: 0 0 0 8px rgba(34,197,94,0); } 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); } }
+  .new-badge { background: var(--accent); color: #062029; }
+  @media (prefers-reduced-motion: reduce) { .pm .ring, .live-dot, .pm.sel::after { animation: none; } }
+</style>
+</head>
+<body class="min-h-screen lg:h-screen flex flex-col lg:overflow-hidden text-[14px]">
+
+<!-- ============================== HEADER ============================== -->
+<header class="shrink-0 border-b border-[#1e2938] bg-[#0c111a]/95 backdrop-blur">
+  <div class="flex flex-wrap items-center gap-x-6 gap-y-3 px-4 py-3">
+    <div class="flex items-center gap-3 min-w-0">
+      <svg viewBox="0 0 32 32" class="w-8 h-8 shrink-0" aria-hidden="true">
+        <circle cx="16" cy="16" r="13" fill="none" stroke="#ef4444" stroke-width="2.5"/>
+        <circle cx="16" cy="16" r="7" fill="none" stroke="#f59e0b" stroke-width="2"/>
+        <circle cx="16" cy="16" r="2.6" fill="#22d3ee"/>
+      </svg>
+      <div class="min-w-0">
+        <h1 class="text-[15px] font-semibold tracking-wide text-white leading-tight">FasTI <span class="text-slate-500 font-normal">·</span> Threat &amp; Crisis Intelligence</h1>
+        <div class="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5">
+          <span id="liveDot" class="live-dot"></span>
+          <span id="statusText">Lade Lagebild …</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="flex flex-wrap items-stretch gap-2 ml-auto" id="kpis">
+      <div class="kpi rounded-lg px-3 py-1.5 min-w-[112px]">
+        <div class="text-[10px] uppercase tracking-wider text-slate-400">Kritisch <span class="text-slate-600">8–10</span></div>
+        <div class="flex items-baseline gap-1.5"><span id="kpiCrit" class="text-2xl font-semibold text-[#ef4444] mono">–</span><span class="text-[11px] text-slate-500">Vorfälle</span></div>
+      </div>
+      <div class="kpi rounded-lg px-3 py-1.5 min-w-[112px]">
+        <div class="text-[10px] uppercase tracking-wider text-slate-400">Hoch <span class="text-slate-600">5–7</span></div>
+        <div class="flex items-baseline gap-1.5"><span id="kpiHigh" class="text-2xl font-semibold text-[#f59e0b] mono">–</span><span class="text-[11px] text-slate-500">Bedrohungen</span></div>
+      </div>
+      <div class="kpi rounded-lg px-3 py-1.5 min-w-[112px]">
+        <div class="text-[10px] uppercase tracking-wider text-slate-400">Aktive Kategorien</div>
+        <div class="flex items-baseline gap-1.5"><span id="kpiCats" class="text-2xl font-semibold text-[#22d3ee] mono">–</span><span class="text-[11px] text-slate-500">von 4</span></div>
+      </div>
+      <div class="kpi rounded-lg px-3 py-1.5 min-w-[112px]">
+        <div class="text-[10px] uppercase tracking-wider text-slate-400">Lagemeldungen</div>
+        <div class="flex items-baseline gap-1.5"><span id="kpiTotal" class="text-2xl font-semibold text-slate-100 mono">–</span><span id="kpiTotalSub" class="text-[11px] text-slate-500">im Filter</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="flex flex-wrap items-center gap-2 px-4 pb-3">
+    <div class="flex flex-wrap gap-1.5" id="catFilters" role="group" aria-label="Kategorie"></div>
+    <span class="hidden md:block w-px h-6 bg-[#1e2938] mx-1"></span>
+    <div class="flex gap-1.5" id="sevFilters" role="group" aria-label="Severity"></div>
+    <span class="hidden md:block w-px h-6 bg-[#1e2938] mx-1"></span>
+    <div class="flex gap-1.5" id="timeFilters" role="group" aria-label="Zeitraum"></div>
+    <div class="ml-auto flex items-center gap-2 w-full sm:w-auto">
+      <div class="relative flex-1 sm:w-64">
+        <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 3.3 9.9l3.15 3.15a.75.75 0 1 0 1.06-1.06l-3.15-3.15A5.5 5.5 0 0 0 9 3.5ZM5 9a4 4 0 1 1 8 0 4 4 0 0 1-8 0Z" clip-rule="evenodd"/></svg>
+        <input id="search" type="search" placeholder="Suche: Ort, CVE, Akteur, Sektor …" autocomplete="off"
+               class="w-full rounded-md bg-[#0f1520] border border-[#1e2938] pl-8 pr-2 py-1.5 text-[13px] text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-[#22d3ee]">
+      </div>
+      <select id="sort" class="rounded-md bg-[#0f1520] border border-[#1e2938] px-2 py-1.5 text-[13px] text-slate-300 focus:outline-none focus:border-[#22d3ee]" aria-label="Sortierung">
+        <option value="time">Neueste zuerst</option>
+        <option value="severity">Höchste Severity</option>
+      </select>
+      <button id="refreshBtn" title="Jetzt neu laden" class="fbtn rounded-md px-2 py-1.5" aria-label="Neu laden">
+        <svg viewBox="0 0 20 20" class="w-4 h-4" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M15.3 4.7A7 7 0 1 0 17 10a.75.75 0 0 0-1.5 0 5.5 5.5 0 1 1-1.3-3.54l-1.7 1.7h4.25V3.9l-1.45 1.45Z" clip-rule="evenodd"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- ============================== MAIN ============================== -->
+<main class="flex-1 min-h-0 flex flex-col lg:flex-row">
+  <section class="relative lg:w-[60%] h-[42vh] lg:h-auto shrink-0 border-b lg:border-b-0 lg:border-r border-[#1e2938]">
+    <div id="map" class="absolute inset-0"></div>
+    <div class="absolute left-3 bottom-6 z-[500] rounded-lg bg-[#0c111a]/90 border border-[#1e2938] px-3 py-2 text-[11px] text-slate-300 space-y-1 pointer-events-none">
+      <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-[#ef4444] shadow-[0_0_8px_#ef4444]"></span>Kritisch (8–10)</div>
+      <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-[#f59e0b] shadow-[0_0_8px_#f59e0b]"></span>Hoch (5–7)</div>
+      <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-[#3b82f6] shadow-[0_0_8px_#3b82f6]"></span>Info / Niedrig (1–4)</div>
+      <div id="noGeoNote" class="text-slate-500 pt-1 border-t border-[#1e2938] hidden"></div>
+    </div>
+  </section>
+
+  <aside class="lg:w-[40%] flex-1 min-h-0 flex flex-col bg-[#0b1018]">
+    <div class="flex items-center justify-between px-4 py-2 border-b border-[#1e2938] text-[12px] text-slate-400">
+      <span id="feedHeader">Threat Feed</span>
+      <button id="clearSel" class="hidden text-[#22d3ee] hover:underline">Auswahl aufheben (Esc)</button>
+    </div>
+    <div id="feed" class="flex-1 lg:overflow-y-auto px-3 py-3 space-y-2.5" aria-live="polite"></div>
+    <details class="border-t border-[#1e2938] text-[12px] text-slate-400">
+      <summary class="px-4 py-2 cursor-pointer select-none hover:text-slate-200" id="sourcesSummary">Quellen</summary>
+      <ul id="sourcesList" class="px-4 pb-3 space-y-1 max-h-48 overflow-y-auto"></ul>
+    </details>
+  </aside>
+</main>
+
+<script>
+"use strict";
+/* ====================================================================
+   FasTI Frontend – lädt threats.json zyklisch und rendert Karte + Feed
+   ==================================================================== */
+const DATA_URL = "threats.json";
+const REFRESH_MS = 30_000;
+const CATS = {
+  cyber:          { label: "Cyber",             icon: '<path d="M10 2 3 5v5c0 4.4 3 7.6 7 8 4-.4 7-3.6 7-8V5l-7-3Zm0 5.5a1.75 1.75 0 0 1 .75 3.33V13a.75.75 0 0 1-1.5 0v-2.17A1.75 1.75 0 0 1 10 7.5Z"/>' },
+  geopolitics:    { label: "Geopolitik",        icon: '<path d="M10 2a8 8 0 1 0 0 16 8 8 0 0 0 0-16Zm5.9 7.25h-2.67a12.7 12.7 0 0 0-1.4-5.33 6.52 6.52 0 0 1 4.07 5.33ZM10 16.4c-.7-.8-1.6-2.6-1.73-5.65h3.46C11.6 13.8 10.7 15.6 10 16.4Zm-1.73-7.15C8.4 6.2 9.3 4.4 10 3.6c.7.8 1.6 2.6 1.73 5.65H8.27Zm-.1-5.33a12.7 12.7 0 0 0-1.4 5.33H4.1a6.52 6.52 0 0 1 4.07-5.33ZM4.1 10.75h2.67c.08 1.97.55 3.86 1.4 5.33a6.52 6.52 0 0 1-4.07-5.33Zm7.73 5.33c.85-1.47 1.32-3.36 1.4-5.33h2.67a6.52 6.52 0 0 1-4.07 5.33Z"/>' },
+  natural:        { label: "Naturkatastrophen", icon: '<path d="M10.9 2.2a.75.75 0 0 0-1.3-.1L4.1 10.6a.75.75 0 0 0 .64 1.15h3.9l-1.1 5.6a.75.75 0 0 0 1.35.55l5.5-8.5a.75.75 0 0 0-.63-1.15h-3.76l.9-6.05Z"/>' },
+  infrastructure: { label: "Infrastruktur",     icon: '<path d="M4 3.75A.75.75 0 0 1 4.75 3h10.5a.75.75 0 0 1 .75.75v12.5a.75.75 0 0 1-.75.75H13v-3a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v3H4.75a.75.75 0 0 1-.75-.75V3.75ZM7 6v1.5h1.5V6H7Zm4.5 0v1.5H13V6h-1.5ZM7 9v1.5h1.5V9H7Zm4.5 0v1.5H13V9h-1.5Z"/>' },
+};
+const SEV_FILTERS = [{ k: 0, label: "Alle" }, { k: 5, label: "≥ 5 Hoch" }, { k: 8, label: "≥ 8 Kritisch" }];
+const TIME_FILTERS = [{ k: 24, label: "24 h" }, { k: 168, label: "7 Tage" }, { k: 0, label: "Alles" }];
+const ANALYSIS_LABEL = { ai: "KI-Analyse", heuristic: "Regelbasiert", structured: "Strukturierte Quelle" };
+
+const state = {
+  data: null, generatedAt: null, threats: [], byId: new Map(),
+  cat: "all", minSev: 0, hours: 0, q: "", sort: "time",
+  selectedId: null, knownIds: null, newIds: new Set(), lastError: null,
+};
+try {
+  const saved = JSON.parse(localStorage.getItem("fasti.filters") || "{}");
+  Object.assign(state, { cat: saved.cat ?? "all", minSev: saved.minSev ?? 0, hours: saved.hours ?? 0, sort: saved.sort ?? "time" });
+} catch (_) { /* localStorage nicht verfügbar */ }
+function persist() {
+  try { localStorage.setItem("fasti.filters", JSON.stringify({ cat: state.cat, minSev: state.minSev, hours: state.hours, sort: state.sort })); } catch (_) {}
+}
+
+/* ---------- Helfer ---------- */
+const $ = (id) => document.getElementById(id);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const safeUrl = (u) => { try { const x = new URL(u); return /^https?:$/.test(x.protocol) ? x.href : ""; } catch (_) { return ""; } };
+const sevClass = (s) => (s >= 8 ? "crit" : s >= 5 ? "high" : "low");
+const sevLabel = (s) => (s >= 8 ? "Kritisch" : s >= 5 ? "Hoch" : s >= 3 ? "Moderat" : "Info");
+const catIcon = (c, cls = "w-3.5 h-3.5") => `<svg viewBox="0 0 20 20" fill="currentColor" class="${cls}" aria-hidden="true">${(CATS[c] || CATS.geopolitics).icon}</svg>`;
+const rtf = new Intl.RelativeTimeFormat("de", { numeric: "auto" });
+function ago(iso) {
+  const t = Date.parse(iso); if (isNaN(t)) return "";
+  const s = (t - Date.now()) / 1000, a = Math.abs(s);
+  if (a < 60) return "gerade eben";
+  if (a < 3600) return rtf.format(Math.round(s / 60), "minute");
+  if (a < 86400) return rtf.format(Math.round(s / 3600), "hour");
+  return rtf.format(Math.round(s / 86400), "day");
+}
+const fmtTime = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleString("de-DE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }); };
+const hasGeo = (t) => Number.isFinite(t.latitude) && Number.isFinite(t.longitude);
+
+/* ---------- Karte ---------- */
+const map = L.map("map", { zoomControl: true, worldCopyJump: true, minZoom: 2, maxZoom: 12, attributionControl: true })
+  .setView([30, 15], 2);
+L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+  subdomains: "abcd", maxZoom: 19,
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+}).addTo(map);
+const markerLayer = L.layerGroup().addTo(map);
+const markers = new Map();
+let fittedOnce = false;
+
+function markerIcon(t, selected) {
+  return L.divIcon({
+    className: "", iconSize: [18, 18], iconAnchor: [9, 9], popupAnchor: [0, -10],
+    html: `<div class="pm ${sevClass(t.severity_score)}${selected ? " sel" : ""}"><span class="ring"></span>${t.severity_score >= 8 ? '<span class="ring r2"></span>' : ""}<span class="core"></span></div>`,
+  });
+}
+function popupHtml(t) {
+  const url = safeUrl(t.source_url);
+  const cat = CATS[t.category] || CATS.geopolitics;
+  return `<div class="cat-${esc(t.category)} sev-${sevClass(t.severity_score)}" style="max-width:290px">
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+      <span class="cat-badge" style="display:inline-flex;gap:4px;align-items:center;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">${catIcon(t.category, "w-3 h-3")}${esc(cat.label)}</span>
+      <span class="sev-pill mono" style="padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700">${t.severity_score}/10 ${esc(sevLabel(t.severity_score).toUpperCase())}</span>
+    </div>
+    <div style="font-weight:600;color:#fff;font-size:13.5px;margin-bottom:4px">${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer" style="color:#fff">${esc(t.title)}</a>` : esc(t.title)}</div>
+    <div style="color:#8494a8;font-size:11.5px;margin-bottom:6px">${esc(t.location_name)} · ${esc(fmtTime(t.timestamp))}</div>
+    <div style="color:#cbd5e1;font-size:12.5px"><b style="color:#94a3b8;font-weight:600">Impact:</b> ${esc(t.impact_summary)}</div>
+  </div>`;
+}
+
+function renderMarkers(list) {
+  markerLayer.clearLayers();
+  markers.clear();
+  // Gleiche Koordinaten (z. B. Landesmitte) spiralförmig auffächern
+  const groups = new Map();
+  const geo = list.filter(hasGeo).sort((a, b) => a.severity_score - b.severity_score);
+  for (const t of geo) {
+    const key = `${t.latitude.toFixed(2)},${t.longitude.toFixed(2)}`;
+    const n = groups.get(key) || 0; groups.set(key, n + 1);
+    let lat = t.latitude, lng = t.longitude;
+    if (n > 0) { const ang = n * 2.4, r = 0.35 * Math.sqrt(n); lat += r * Math.sin(ang); lng += r * Math.cos(ang); }
+    const m = L.marker([lat, lng], { icon: markerIcon(t, t.id === state.selectedId), riseOnHover: true, zIndexOffset: t.severity_score * 100, keyboard: false, title: t.title })
+      .bindPopup(() => popupHtml(t), { maxWidth: 320, autoPanPadding: [30, 30] })
+      .on("click", () => select(t.id, "map"));
+    m.addTo(markerLayer);
+    markers.set(t.id, m);
+  }
+  const noGeo = list.length - geo.length;
+  const note = $("noGeoNote");
+  note.classList.toggle("hidden", noGeo === 0);
+  note.textContent = `${noGeo} Meldung${noGeo === 1 ? "" : "en"} ohne Geo-Bezug (nur im Feed)`;
+  if (!fittedOnce && geo.length) {
+    fittedOnce = true;
+    const b = L.latLngBounds(geo.map((t) => [t.latitude, t.longitude]));
+    map.fitBounds(b.pad(0.15), { maxZoom: 4 });
+  }
+}
+
+/* ---------- Filter ---------- */
+function inTime(t) { return !state.hours || Date.now() - Date.parse(t.timestamp) <= state.hours * 3600e3; }
+function matchesQuery(t) {
+  if (!state.q) return true;
+  const hay = [t.title, t.source_title, t.location_name, t.country_code, t.impact_summary, t.source_name, ...(t.entities || [])].join(" ").toLowerCase();
+  return state.q.toLowerCase().split(/\s+/).filter(Boolean).every((w) => hay.includes(w));
+}
+function baseSet() { return state.threats.filter((t) => inTime(t) && matchesQuery(t)); }
+function visibleSet() {
+  const list = baseSet().filter((t) => (state.cat === "all" || t.category === state.cat) && t.severity_score >= state.minSev);
+  return list.sort(state.sort === "severity"
+    ? (a, b) => b.severity_score - a.severity_score || b.timestamp.localeCompare(a.timestamp)
+    : (a, b) => b.timestamp.localeCompare(a.timestamp) || b.severity_score - a.severity_score);
+}
+
+function renderFilters() {
+  const base = baseSet().filter((t) => t.severity_score >= state.minSev);
+  const count = (c) => base.filter((t) => c === "all" || t.category === c).length;
+  $("catFilters").innerHTML = [["all", "Alle"], ...Object.entries(CATS).map(([k, v]) => [k, v.label])].map(([k, label]) =>
+    `<button class="fbtn rounded-md px-2.5 py-1 text-[12.5px] flex items-center gap-1.5 ${state.cat === k ? "on" : ""} ${k !== "all" ? "cat-" + k : ""}" data-cat="${k}">
+      ${k !== "all" ? `<span style="color:${state.cat === k ? "inherit" : "var(--k)"}">${catIcon(k)}</span>` : ""}${esc(label)} <span class="cnt mono">${count(k)}</span></button>`).join("");
+  $("sevFilters").innerHTML = SEV_FILTERS.map((f) =>
+    `<button class="fbtn rounded-md px-2.5 py-1 text-[12.5px] ${state.minSev === f.k ? "on" : ""}" data-sev="${f.k}">${esc(f.label)}</button>`).join("");
+  $("timeFilters").innerHTML = TIME_FILTERS.map((f) =>
+    `<button class="fbtn rounded-md px-2.5 py-1 text-[12.5px] ${state.hours === f.k ? "on" : ""}" data-hours="${f.k}">${esc(f.label)}</button>`).join("");
+  $("sort").value = state.sort;
+}
+
+function renderKpis(visible) {
+  const scope = baseSet();
+  $("kpiCrit").textContent = scope.filter((t) => t.severity_score >= 8).length;
+  $("kpiHigh").textContent = scope.filter((t) => t.severity_score >= 5 && t.severity_score <= 7).length;
+  $("kpiCats").textContent = new Set(scope.map((t) => t.category)).size;
+  $("kpiTotal").textContent = visible.length;
+  $("kpiTotalSub").textContent = `von ${state.threats.length}`;
+}
+
+/* ---------- Feed ---------- */
+function entityChip(e) {
+  const cls = /^CVE-\d{4}-\d+$/i.test(e) ? "cve" : /^[A-Z]{2}$/.test(e) ? "cc" : "";
+  return `<button class="chip ${cls} rounded px-1.5 py-0.5 text-[11px] mono hover:text-white" data-entity="${esc(e)}" title="Nach „${esc(e)}“ filtern">${esc(e)}</button>`;
+}
+function cardHtml(t) {
+  const url = safeUrl(t.source_url), sc = sevClass(t.severity_score), cat = CATS[t.category] || CATS.geopolitics;
+  const coords = hasGeo(t) ? `<span class="mono text-slate-500">${t.latitude.toFixed(2)}, ${t.longitude.toFixed(2)}</span>` : `<span class="text-slate-600">keine Koordinaten</span>`;
+  return `<article id="card-${esc(t.id)}" data-id="${esc(t.id)}" tabindex="0"
+      class="card sev-${sc} cat-${esc(t.category)} rounded-lg px-3.5 py-3 cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-[#22d3ee] ${t.id === state.selectedId ? "sel" : ""}">
+    <div class="flex items-center gap-2 mb-1.5">
+      <span class="cat-badge inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide">${catIcon(t.category, "w-3 h-3")}${esc(cat.label)}</span>
+      <span class="sev-pill mono rounded px-1.5 py-0.5 text-[10.5px] font-bold">${t.severity_score}/10 · ${esc(sevLabel(t.severity_score).toUpperCase())}</span>
+      ${state.newIds.has(t.id) ? '<span class="new-badge rounded px-1.5 py-0.5 text-[10px] font-bold">NEU</span>' : ""}
+      <span class="ago ml-auto text-[11px] text-slate-500 whitespace-nowrap" data-ts="${esc(t.timestamp)}" title="${esc(fmtTime(t.timestamp))}">${esc(ago(t.timestamp))}</span>
+    </div>
+    <div class="flex gap-0.5 mb-2" aria-hidden="true">${Array.from({ length: 10 }, (_, i) => `<span class="h-[3px] flex-1 rounded-sm ${i < t.severity_score ? "sev-bar" : "bg-[#1b2433]"}"></span>`).join("")}</div>
+    <h3 class="text-[14px] font-semibold leading-snug text-slate-50">
+      ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer" class="hover:text-[#22d3ee] hover:underline decoration-1 underline-offset-2">${esc(t.title)}<svg viewBox="0 0 20 20" fill="currentColor" class="inline w-3 h-3 ml-1 -mt-0.5 opacity-60"><path d="M11 3a1 1 0 1 0 0 2h2.59l-6.3 6.3a1 1 0 1 0 1.42 1.4L15 6.42V9a1 1 0 1 0 2 0V4a1 1 0 0 0-1-1h-5Z"/><path d="M5 5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-3a1 1 0 1 0-2 0v3H5V7h3a1 1 0 0 0 0-2H5Z"/></svg></a>` : esc(t.title)}
+    </h3>
+    <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1 text-[11.5px] text-slate-400">
+      <svg viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5 text-slate-500" aria-hidden="true"><path fill-rule="evenodd" d="m9.7 17.6.07.04.03.02a.76.76 0 0 0 .4 0l.03-.02.07-.04a16.9 16.9 0 0 0 4.6-4.04C16.3 11.97 17 10.2 17 8.5a7 7 0 1 0-14 0c0 1.7.7 3.47 2.1 5.06a16.9 16.9 0 0 0 4.6 4.04ZM10 11a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" clip-rule="evenodd"/></svg>
+      <span>${esc(t.location_name || "Global")}${t.country_code ? ` <span class="mono text-slate-500">(${esc(t.country_code)})</span>` : ""}</span>
+      <span class="text-slate-700">|</span>${coords}
+    </div>
+    <p class="mt-2 text-[13px] leading-relaxed text-slate-300"><span class="text-[10.5px] font-semibold uppercase tracking-wider text-slate-500 mr-1">Impact</span>${esc(t.impact_summary)}</p>
+    ${(t.entities || []).length ? `<div class="flex flex-wrap gap-1 mt-2.5">${t.entities.map(entityChip).join("")}</div>` : ""}
+    <div class="flex items-center gap-2 mt-2.5 pt-2 border-t border-[#1b2433] text-[11px] text-slate-500">
+      <span class="truncate">${esc(t.source_name)}</span><span class="text-slate-700">·</span><span>${esc(fmtTime(t.timestamp))}</span>
+      <span class="ml-auto">${esc(ANALYSIS_LABEL[t.analysis] || "")}</span>
+    </div>
+  </article>`;
+}
+
+function renderFeed(list) {
+  const feed = $("feed");
+  if (!state.data) return;
+  if (!list.length) {
+    feed.innerHTML = `<div class="text-center text-slate-500 py-16 px-6">
+      <div class="text-slate-300 font-medium mb-1">${state.threats.length ? "Keine Meldungen für diesen Filter" : "Noch keine Lagemeldungen"}</div>
+      <div class="text-[12px]">${state.threats.length ? "Filter oder Zeitraum erweitern." : "Das Backend sammelt gerade Daten – die Ansicht aktualisiert sich automatisch."}</div></div>`;
+  } else {
+    feed.innerHTML = list.map(cardHtml).join("");
+  }
+  $("feedHeader").textContent = `Threat Feed · ${list.length} Meldung${list.length === 1 ? "" : "en"}`;
+}
+
+function renderSources() {
+  const feeds = (state.data && state.data.feeds) || [];
+  const ok = feeds.filter((f) => f.ok).length;
+  $("sourcesSummary").textContent = `Quellen: ${ok}/${feeds.length} erreichbar`;
+  $("sourcesList").innerHTML = feeds.map((f) => `<li class="flex gap-2 items-start">
+    <span class="mt-1 w-1.5 h-1.5 rounded-full shrink-0 ${f.ok ? "bg-emerald-400" : "bg-red-500"}"></span>
+    <span class="flex-1"><span class="text-slate-300">${esc(f.name)}</span>
+      <span class="text-slate-500"> · ${f.ok ? `${f.items} Einträge, ${f.new} neu` : esc(f.error)}</span></span></li>`).join("");
+}
+
+function render() {
+  renderFilters();
+  const list = visibleSet();
+  renderKpis(list);
+  renderMarkers(list);
+  renderFeed(list);
+  if (state.selectedId && !list.some((t) => t.id === state.selectedId)) state.selectedId = null;
+  $("clearSel").classList.toggle("hidden", !state.selectedId);
+}
+
+/* ---------- Verknüpfung Karte <-> Feed ---------- */
+function select(id, origin) {
+  const t = state.byId.get(id);
+  if (!t) return;
+  const prev = state.selectedId;
+  state.selectedId = id;
+  if (prev && prev !== id) {
+    document.getElementById("card-" + prev)?.classList.remove("sel");
+    const pm = markers.get(prev); const pt = state.byId.get(prev);
+    if (pm && pt) pm.setIcon(markerIcon(pt, false));
+  }
+  const card = document.getElementById("card-" + id);
+  if (card) {
+    card.classList.add("sel");
+    card.classList.remove("flash"); void card.offsetWidth; card.classList.add("flash");
+    if (origin === "map") card.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+  const m = markers.get(id);
+  if (m) {
+    m.setIcon(markerIcon(t, true));
+    if (origin === "feed") {
+      map.flyTo(m.getLatLng(), Math.max(map.getZoom(), 5), { duration: 0.8 });
+      map.once("moveend", () => m.openPopup());
+    }
+  }
+  $("clearSel").classList.remove("hidden");
+}
+function clearSelection() {
+  const id = state.selectedId; state.selectedId = null;
+  if (!id) return;
+  document.getElementById("card-" + id)?.classList.remove("sel");
+  const m = markers.get(id), t = state.byId.get(id);
+  if (m && t) { m.setIcon(markerIcon(t, false)); m.closePopup(); }
+  $("clearSel").classList.add("hidden");
+}
+
+/* ---------- Events ---------- */
+document.addEventListener("click", (ev) => {
+  const cat = ev.target.closest("[data-cat]"); if (cat) { state.cat = cat.dataset.cat; persist(); return render(); }
+  const sev = ev.target.closest("[data-sev]"); if (sev) { state.minSev = +sev.dataset.sev; persist(); return render(); }
+  const hrs = ev.target.closest("[data-hours]"); if (hrs) { state.hours = +hrs.dataset.hours; persist(); return render(); }
+  const ent = ev.target.closest("[data-entity]");
+  if (ent) { ev.stopPropagation(); $("search").value = state.q = ent.dataset.entity; return render(); }
+  if (ev.target.closest("a")) return;
+  const card = ev.target.closest("article[data-id]");
+  if (card) {
+    if (card.dataset.id === state.selectedId && ev.detail > 0) return clearSelection();
+    select(card.dataset.id, "feed");
+  }
+});
+$("feed").addEventListener("keydown", (ev) => {
+  const card = ev.target.closest("article[data-id]");
+  if (card && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); select(card.dataset.id, "feed"); }
+});
+document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") clearSelection(); });
+let qTimer;
+$("search").addEventListener("input", (ev) => { clearTimeout(qTimer); qTimer = setTimeout(() => { state.q = ev.target.value.trim(); render(); }, 150); });
+$("sort").addEventListener("change", (ev) => { state.sort = ev.target.value; persist(); render(); });
+$("refreshBtn").addEventListener("click", () => load(true));
+$("clearSel").addEventListener("click", clearSelection);
+
+/* ---------- Daten laden ---------- */
+async function load(force = false) {
+  try {
+    const res = await fetch(`${DATA_URL}?t=${Date.now()}`, { cache: "no-store" });
+    if (res.status === 404) throw new Error("threats.json noch nicht vorhanden – Backend läuft?");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    state.lastError = null;
+    if (!force && state.data && data.generated_at === state.generatedAt) return updateStatus();
+    const threats = (data.threats || []).filter((t) => t && t.id).map((t) => ({
+      ...t,
+      severity_score: Math.max(1, Math.min(10, parseInt(t.severity_score, 10) || 1)),
+      latitude: t.latitude === null || t.latitude === undefined ? NaN : Number(t.latitude),
+      longitude: t.longitude === null || t.longitude === undefined ? NaN : Number(t.longitude),
+      entities: Array.isArray(t.entities) ? t.entities.map(String) : [],
+      timestamp: t.timestamp || data.generated_at,
+    }));
+    const ids = new Set(threats.map((t) => t.id));
+    if (state.knownIds) for (const id of ids) if (!state.knownIds.has(id)) state.newIds.add(id);
+    state.knownIds = ids;
+    state.data = data; state.generatedAt = data.generated_at; state.threats = threats;
+    state.byId = new Map(threats.map((t) => [t.id, t]));
+    const sel = state.selectedId, popupOpen = sel && markers.get(sel)?.isPopupOpen();
+    render();
+    renderSources();
+    if (popupOpen && markers.get(sel)) markers.get(sel).openPopup();
+    updateStatus();
+  } catch (err) {
+    const fileMode = location.protocol === "file:";
+    state.lastError = fileMode ? "Bitte über start.sh öffnen (http://localhost:8000) – file:// kann threats.json nicht laden." : err.message;
+    updateStatus();
+    if (!state.data) { state.data = { feeds: [] }; renderFeed([]); }
+  }
+}
+function updateStatus() {
+  const dot = $("liveDot"), d = state.data, error = state.lastError;
+  if (error) { dot.className = "live-dot down"; $("statusText").textContent = error; return; }
+  const gen = Date.parse(state.generatedAt);
+  const maxAge = ((d && d.poll_interval_minutes) || 30) * 60e3 * 2.5;
+  const stale = !isNaN(gen) && Date.now() - gen > maxAge;
+  dot.className = "live-dot" + (stale ? " stale" : "");
+  const prov = d && d.ai_provider && d.ai_provider !== "none" ? `KI: ${d.ai_provider}` : "regelbasiert";
+  $("statusText").textContent = `${stale ? "Daten veraltet · " : "Live · "}Stand ${fmtTime(state.generatedAt)} (${ago(state.generatedAt)}) · ${prov}`;
+}
+
+load();
+setInterval(load, REFRESH_MS);
+setInterval(() => {
+  updateStatus();
+  document.querySelectorAll(".ago[data-ts]").forEach((el) => { el.textContent = ago(el.dataset.ts); });
+}, 60_000);
+</script>
+</body>
+</html>
