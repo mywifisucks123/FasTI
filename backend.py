@@ -21,7 +21,10 @@ import html
 import json
 import logging
 import os
+import math
 import re
+import secrets
+import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -38,6 +41,8 @@ import config
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(BASE_DIR, config.OUTPUT_FILE)
+STATE_FILE = os.path.join(BASE_DIR, "fasti_state.json")       # Push-Topic, versendete Meldungen
+DECISIONS_FILE = os.path.join(BASE_DIR, "decisions.json")     # Protokoll/Verwerfungen aus dem Dashboard
 LOCK_FILE = os.path.join(BASE_DIR, ".backend.lock")
 CATEGORIES = ("cyber", "geopolitics", "natural", "infrastructure")
 SCHEMA_VERSION = 1
@@ -499,7 +504,8 @@ RELEVANCE_RE = re.compile(
     r"sanction|sanktion|nuclear|nuklear|terror|coup|putsch|protest|unrest|unruhen|crisis|krise|emergency|notstand|evacuat|evakuier|"
     r"earthquake|erdbeben|flood|hochwasser|storm|sturm|hurricane|cyclone|wildfire|waldbrand|disaster|katastrophe|outage|ausfall|"
     r"blackout|cyber|hack|ransomware|sabotage|ceasefire|waffenruhe|refugee|flüchtling|famine|hunger|epidemic|epidemie|outbreak|"
-    r"shipping|schifffahrt|tanker|blockade|explosion|hostage|geisel|security|sicherheit|warning|warnung|border|grenze",
+    r"shipping|schifffahrt|tanker|blockade|explosion|hostage|geisel|security|sicherheit|warning|warnung|border|grenze|"
+    r"embassy|botschaft|diplomat|ambassador|departure|ausreise|evakuierung|bank|börse|zentralbank|airspace|luftraum",
     re.IGNORECASE,
 )
 
@@ -592,7 +598,7 @@ def clean_triggers(values) -> list[str]:
 
 def analyze_heuristic(item: dict) -> dict | None:
     title, text = item["title"], item["text"]
-    if item.get("filter") and not RELEVANCE_RE.search(f"{title} {text}"):
+    if item.get("filter") and not RELEVANCE_RE.search(f"{title} {text}") and not detect_triggers(title, text):
         return None
     category = guess_category(title, text, item["feed_category"])
     geo = None
@@ -618,7 +624,7 @@ def harden_local(item: dict, res: dict) -> dict:
     title, text = item["title"], item.get("text", "")
     if res.get("relevant") is False:
         return res
-    if item.get("filter") and not RELEVANCE_RE.search(f"{title} {text}"):
+    if item.get("filter") and not RELEVANCE_RE.search(f"{title} {text}") and not detect_triggers(title, text):
         return {**res, "relevant": False}
     res = dict(res)
     # Trigger nur, wenn KI UND Regeln übereinstimmen
@@ -753,10 +759,22 @@ def parse_rss(feed: dict) -> list[tuple[dict, dict]]:
         text = e.get("summary") or ""
         if not text and e.get("content"):
             text = e["content"][0].get("value", "")
-        item = base_item(feed, e.get("id") or e.get("guid") or "", e.get("title", ""), e.get("link", ""),
+        title = e.get("title", "")
+        outlet = ""
+        if "news.google." in feed["url"]:
+            # Google News: "Titel - Quelle" → Titel; echte Quelle als Absender anzeigen
+            outlet = clean_text(str((e.get("source") or {}).get("title") or ""))
+            if outlet and title.endswith(" - " + outlet):
+                title = title[: -len(outlet) - 3]
+            else:
+                title = re.sub(r"\s+-\s+[^-]{2,60}$", "", title)
+            text = ""  # Google-News-Beschreibung ist nur eine Linkliste
+        item = base_item(feed, e.get("id") or e.get("guid") or "", title, e.get("link", ""),
                          text, entry_datetime(e))
         if not item["title"]:
             continue
+        if outlet:
+            item["feed_name"] = f"{outlet} (Google News)"
         item["lat"], item["lon"] = entry_coords(e)
         out.append((item, e))
     return out
@@ -979,7 +997,78 @@ def fetch_nina(feed: dict) -> list[dict]:
     return items
 
 
-ADAPTERS = {"rss": fetch_rss, "usgs": fetch_usgs, "gdacs": fetch_gdacs, "aa": fetch_aa, "nina": fetch_nina}
+NINA_RANK = {"minor": 1, "moderate": 2, "severe": 3, "extreme": 4}
+
+
+def fetch_nina_local(feed: dict) -> list[dict]:
+    """NINA-Dashboard je Kreis: alle Warnungen (BBK, DWD, Polizei, Hochwasser) für die Lage vor Ort."""
+    min_dwd = NINA_RANK.get(str(config.LOCAL_DWD_MIN_SEVERITY).lower(), 2)
+    found: dict[str, dict] = {}
+    errors = 0
+    for ags, (dname, dlat, dlon) in config.LOCAL_DISTRICTS.items():
+        try:
+            warnings = http_get(f"{feed['url'].rstrip('/')}/{ags}0000000.json").json() or []
+        except (requests.RequestException, ValueError) as exc:
+            errors += 1
+            log.debug("NINA-Dashboard %s: %s", ags, exc)
+            continue
+        for w in warnings:
+            payload = w.get("payload") or {}
+            data = payload.get("data") or {}
+            wid = w.get("id") or payload.get("id")
+            if not wid:
+                continue
+            if wid in found:
+                found[wid]["districts"].append(dname)
+                continue
+            title = data.get("headline") or (w.get("i18nTitle") or {}).get("de") or "Warnmeldung"
+            provider = str(data.get("provider") or payload.get("type") or "").upper()
+            severity = str(data.get("severity") or "").lower()
+            if str(data.get("msgType", "")).lower() == "cancel" or re.search(r"\btest", title, re.IGNORECASE):
+                continue
+            if provider.startswith("DWD") and NINA_RANK.get(severity, 1) < min_dwd:
+                continue
+            found[wid] = {"id": wid, "title": title, "provider": provider, "severity": severity,
+                          "sent": w.get("sent") or w.get("startDate") or payload.get("sent"),
+                          "districts": [dname], "lat": dlat, "lon": dlon}
+    if errors == len(config.LOCAL_DISTRICTS):
+        raise requests.ConnectionError("NINA-Dashboard nicht erreichbar")
+    items = []
+    for w in list(found.values())[:30]:
+        desc = instruction = ""
+        try:
+            detail = http_get(f"https://warnung.bund.de/api31/warnings/{w['id']}.json").json()
+            info = next((i for i in detail.get("info", []) if str(i.get("language", "")).startswith("de")),
+                        (detail.get("info") or [{}])[0])
+            desc, instruction = info.get("description") or "", info.get("instruction") or ""
+            w["title"] = info.get("headline") or w["title"]
+        except (requests.RequestException, ValueError, AttributeError):
+            pass
+        title = w["title"]
+        area = ", ".join(dict.fromkeys(w["districts"]))
+        body = desc[len(title):].lstrip(" .:-–") if desc.startswith(title) else desc
+        sents = [x for x in SENT_RE.split(two_sentences(body)) if x] if body else []
+        if instruction:
+            sents.append(two_sentences(instruction).split(". ")[0].rstrip(".") + ".")
+        summary = " ".join(sents[:2]) or f"{title} – {area}. Details in der Originalmeldung."
+        source = {"DWD": "DWD", "LHP": "Hochwasserzentrale", "POLICE": "Polizei", "MOWAS": "MoWaS"}.get(
+            w["provider"].split("_")[0], w["provider"].title() or "NINA")
+        item = base_item(feed, f"nina-{w['id']}", title, f"https://warnung.bund.de/meldungen/{w['id']}/",
+                         desc or title, parse_iso(w.get("sent")))
+        natural = w["provider"].startswith(("DWD", "LHP"))
+        item["threat"] = build_threat(item, {
+            "title": title, "category": "natural" if natural else "infrastructure",
+            "severity_score": NINA_SEVERITY.get(w["severity"], 4), "location_name": area[:120], "country_code": "DE",
+            "latitude": w["lat"], "longitude": w["lon"], "impact_summary": summary,
+            "entities": ["DE", "Lage vor Ort", source] + extract_entities(title, desc)[:4]}, "structured")
+        item["threat"]["source_name"] = f"NINA · {source}"
+        item["threat"]["local"] = True
+        items.append(item)
+    return items
+
+
+ADAPTERS = {"rss": fetch_rss, "usgs": fetch_usgs, "gdacs": fetch_gdacs, "aa": fetch_aa, "nina": fetch_nina,
+            "nina_local": fetch_nina_local}
 
 
 def fetch_feed(feed: dict) -> tuple[dict, list[dict], str]:
@@ -1351,6 +1440,7 @@ def load_db() -> dict:
             db.setdefault("seen_ids", {})
             db.setdefault("ai_usage", {})
             db.setdefault("ai_status", {})
+            db.setdefault("feed_health", {})
             return db
     except FileNotFoundError:
         pass
@@ -1388,12 +1478,246 @@ def save_db(db: dict, feeds_status: list[dict], provider: str) -> None:
         "threats": threats,
         "seen_ids": seen,
         "ai_usage": db.get("ai_usage", {}),
+        "feed_health": db.get("feed_health", {}),
+        "dead_sources": db.get("dead_sources", []),
+        "dead_after_hours": config.SOURCE_DEAD_HOURS,
+        "home": {"name": config.HOME_NAME, "lat": config.HOME_LAT, "lon": config.HOME_LON,
+                 "radius_km": config.LOCAL_RADIUS_KM},
+        "notify": {"ntfy_enabled": bool(getattr(config, "NTFY_ENABLED", True)),
+                   "ntfy_server": getattr(config, "NTFY_SERVER", "https://ntfy.sh"),
+                   "ntfy_topic": ntfy_topic() if getattr(config, "NTFY_ENABLED", True) else "",
+                   "lists": list(getattr(config, "NOTIFY_LISTS", ["A"]))},
     }
     db["threats"], db["seen_ids"] = threats, seen
     tmp = DATA_FILE + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(out, fh, ensure_ascii=False, indent=1)
     os.replace(tmp, DATA_FILE)  # atomar: das Frontend liest nie eine halbe Datei
+
+
+# ===========================================================================
+# Dubletten: dieselbe Geschichte aus mehreren Quellen
+# ===========================================================================
+STOPWORDS = set("""
+der die das den dem des ein eine einer eines einem einen und oder aber mit von vom zum zur für auf aus bei nach
+über unter vor nach wie als auch nicht noch nur mehr sich sind ist war wird werden wurde wurden hat haben nach
+gegen seit beim durch neue neuen neuer erste ersten heute gestern laut sagt sagen soll sollen kann können will
+the a an and or of to in on at for with from by after over under as is are was were be been has have had will
+would could should says say said new first more than amid into about against its their his her this that these
+""".split())
+
+
+def title_tokens(text: str) -> set[str]:
+    words = re.findall(r"[a-zäöüß0-9]+", (text or "").lower())
+    return {w for w in words if len(w) >= 4 and w not in STOPWORDS}
+
+
+def jaccard(a: set, b: set) -> float:
+    return len(a & b) / len(a | b) if a and b else 0.0
+
+
+def find_duplicate(new: dict, threats: list[dict]) -> dict | None:
+    """Ältere Karte zur selben Geschichte finden (vorsichtig: lieber doppelt als falsch zusammengelegt)."""
+    ts_new = parse_iso(new.get("timestamp")) or now_utc()
+    a_ai, a_src = title_tokens(new["title"]), title_tokens(new.get("source_title", ""))
+    new_a = {t for t in new.get("triggers", []) if t.startswith("A")}
+    best, best_score = None, 0.0
+    for old in threats:
+        if old["id"] == new["id"] or old.get("category") != new.get("category"):
+            continue
+        ts_old = parse_iso(old.get("timestamp")) or ts_new
+        if abs((ts_new - ts_old).total_seconds()) > config.DEDUP_HOURS * 3600:
+            continue
+        if old.get("country_code") and new.get("country_code") and old["country_code"] != new["country_code"]:
+            continue
+        if {t for t in old.get("triggers", []) if t.startswith("A")} != new_a:
+            continue  # unterschiedliche A-Trigger nie zusammenlegen
+        b_ai, b_src = title_tokens(old["title"]), title_tokens(old.get("source_title", ""))
+        score = max(jaccard(a_ai, b_ai), jaccard(a_src, b_src))
+        shared = max(len(a_ai & b_ai), len(a_src & b_src))
+        if score >= config.DEDUP_MIN_SIMILARITY and shared >= 3 and score > best_score:
+            best, best_score = old, score
+    return best
+
+
+def merge_duplicate(primary: dict, dup: dict) -> None:
+    related = primary.setdefault("related", [])
+    if any(r.get("source_url") == dup.get("source_url") for r in related) or primary.get("source_url") == dup.get("source_url"):
+        return
+    related.append({"title": dup.get("source_title") or dup["title"], "source_name": dup.get("source_name", ""),
+                    "source_url": dup.get("source_url", ""), "timestamp": dup.get("timestamp", "")})
+    primary["severity_score"] = max(primary["severity_score"], dup["severity_score"])
+    primary["triggers"] = sorted(set(primary.get("triggers", [])) | set(dup.get("triggers", [])))
+    primary["entities"] = dedupe_list(primary.get("entities", []) + dup.get("entities", []))[:10]
+
+
+def add_threat(db: dict, threat: dict) -> bool:
+    """Fügt eine Meldung hinzu oder hängt sie als weitere Quelle an eine bestehende Karte. True = neue Karte."""
+    dup = find_duplicate(threat, db["threats"])
+    if dup:
+        merge_duplicate(dup, threat)
+        return False
+    db["threats"].append(threat)
+    return True
+
+
+# ===========================================================================
+# Quellen-Gesundheit und Benachrichtigungen
+# ===========================================================================
+def update_feed_health(db: dict, feeds_status: list[dict]) -> list[dict]:
+    """Merkt sich je Quelle den letzten Erfolg; liefert kritische Quellen, die zu lange ausfallen."""
+    health = db.setdefault("feed_health", {})
+    now = now_utc()
+    for f in feeds_status:
+        h = health.setdefault(f["name"], {})
+        if f["ok"]:
+            h.update({"last_ok": iso(now), "fail_since": None, "error": ""})
+        else:
+            h.setdefault("fail_since", None)
+            h["fail_since"] = h["fail_since"] or iso(now)
+            h["error"] = f["error"]
+    names = {f["name"] for f in config.FEEDS}
+    for stale in [n for n in health if n not in names]:
+        del health[stale]
+    dead = []
+    for name in getattr(config, "CRITICAL_FEEDS", []):
+        h = health.get(name) or {}
+        since = parse_iso(h.get("fail_since"))
+        if since and (now - since).total_seconds() > config.SOURCE_DEAD_HOURS * 3600:
+            dead.append({"name": name, "fail_since": h["fail_since"], "last_ok": h.get("last_ok"), "error": h.get("error", "")})
+    return dead
+
+
+def load_json_file(path: str, default):
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return default
+
+
+def save_json_file(path: str, data) -> None:
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, ensure_ascii=False, indent=1)
+    os.replace(tmp, path)
+
+
+def ntfy_topic() -> str:
+    topic = str(getattr(config, "NTFY_TOPIC", "") or "").strip()
+    if topic:
+        return topic
+    state = load_json_file(STATE_FILE, {})
+    if not state.get("ntfy_topic"):
+        state["ntfy_topic"] = "fasti-" + secrets.token_hex(6)
+        save_json_file(STATE_FILE, state)
+    return state["ntfy_topic"]
+
+
+def send_notification(title: str, message: str, priority: int = 4, url: str = "", tags: list | None = None) -> list[str]:
+    """Mac-Mitteilung und/oder ntfy-Push. Liefert die erfolgreich genutzten Kanäle."""
+    sent = []
+    if getattr(config, "NOTIFY_MAC", True) and sys.platform == "darwin":
+        esc = lambda v: v.replace("\\", "\\\\").replace('"', '\\"')  # noqa: E731
+        script = f'display notification "{esc(message[:220])}" with title "{esc(title[:80])}" sound name "Sosumi"'
+        try:
+            subprocess.run(["osascript", "-e", script], timeout=10, capture_output=True)
+            sent.append("mac")
+        except (OSError, subprocess.SubprocessError) as exc:
+            log.debug("Mac-Mitteilung fehlgeschlagen: %s", exc)
+    if getattr(config, "NTFY_ENABLED", True):
+        body = {"topic": ntfy_topic(), "title": title[:120], "message": message[:1000], "priority": priority,
+                "tags": tags or []}
+        if safe_url(url):
+            body["click"] = url
+        try:
+            requests.post(getattr(config, "NTFY_SERVER", "https://ntfy.sh").rstrip("/"), json=body,
+                          timeout=15).raise_for_status()
+            sent.append("ntfy")
+        except requests.RequestException as exc:
+            log.warning("Push über ntfy fehlgeschlagen: %s", exc)
+    return sent
+
+
+def distance_km(lat1, lon1, lat2, lon2) -> float:
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = p2 - p1, math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 6371 * 2 * math.asin(math.sqrt(a))
+
+
+def is_local(t: dict) -> bool:
+    if t.get("local"):
+        return True
+    if t.get("latitude") is None or t.get("longitude") is None:
+        return False
+    return distance_km(config.HOME_LAT, config.HOME_LON, t["latitude"], t["longitude"]) <= config.LOCAL_RADIUS_KM
+
+
+def process_notifications(db: dict, dead_sources: list[dict]) -> None:
+    state = load_json_file(STATE_FILE, {})
+    notified = state.setdefault("notified", {})
+    decisions = load_json_file(DECISIONS_FILE, {})
+    dismissed = set(decisions.get("dismissed", []))
+    now = now_utc()
+    recent = [t for t in db["threats"] if (parse_iso(t.get("timestamp")) or now) >= now - timedelta(hours=48)]
+    first_run = not state.get("baseline_done")
+    messages = []
+
+    lists = set(getattr(config, "NOTIFY_LISTS", ["A"]))
+    for t in recent:
+        for tid in t.get("triggers", []):
+            key = f"{t['id']}:{tid}"
+            if TRIGGER_DEFS.get(tid, {}).get("list") in lists and key not in notified and key not in dismissed:
+                notified[key] = iso(now)
+                label = TRIGGER_DEFS[tid]["label"]
+                messages.append((f"FasTI · Trigger {tid}", f"{label}\n\n{t['title']}\n(Kandidat – an der Quelle prüfen)",
+                                 5 if tid.startswith("A") else 4, t.get("source_url", ""), ["rotating_light"]))
+
+    # Stufe 2: zwei verschiedene A-Punkte in 30 Tagen
+    a_points = {}
+    for t in db["threats"]:
+        if (parse_iso(t.get("timestamp")) or now) < now - timedelta(days=30):
+            continue
+        for tid in t.get("triggers", []):
+            if tid.startswith("A") and f"{t['id']}:{tid}" not in dismissed:
+                a_points[tid] = min(a_points.get(tid, t["timestamp"]), t["timestamp"])
+    if len(a_points) >= 2:
+        key = "stage2:" + ",".join(sorted(a_points))
+        if key not in notified:
+            notified[key] = iso(now)
+            messages.append(("FasTI · STUFE 2 – Entscheidungspunkt",
+                             f"Zwei Punkte aus Liste A in 30 Tagen: {', '.join(sorted(a_points))}. "
+                             "Treffer verifizieren, dann binnen 24–48 h die drei Fragen beantworten.", 5, "", ["warning"]))
+
+    # Lage vor Ort
+    for t in recent:
+        key = f"local:{t['id']}"
+        if is_local(t) and t["severity_score"] >= config.NOTIFY_LOCAL_MIN_SEVERITY and key not in notified:
+            notified[key] = iso(now)
+            messages.append((f"FasTI · Lage vor Ort ({config.HOME_NAME})", f"{t['title']}\n{t['impact_summary']}",
+                             5 if t["severity_score"] >= 9 else 4, t.get("source_url", ""), ["house"]))
+
+    # Tote Quellen (einmal je Ausfall)
+    for d in dead_sources:
+        key = f"dead:{d['name']}:{d['fail_since']}"
+        if key not in notified:
+            notified[key] = iso(now)
+            messages.append(("FasTI · Quelle ausgefallen", f"{d['name']} liefert seit {config.SOURCE_DEAD_HOURS} h keine "
+                             f"Daten ({d['error'][:80]}). Blinder Fleck für die Trigger.", 3, "", ["warning"]))
+
+    if first_run:
+        log.info("Benachrichtigungen eingerichtet (bestehende Meldungen werden nicht nachgemeldet). ntfy-Topic: %s",
+                 ntfy_topic())
+        state["baseline_done"] = iso(now)
+    else:
+        for title, msg, prio, url, tags in messages[:10]:
+            send_notification(title, msg, prio, url, tags)
+        if messages:
+            log.info("%d Benachrichtigung(en) versendet.", min(len(messages), 10))
+    cutoff = now - timedelta(days=60)
+    state["notified"] = {k: v for k, v in notified.items() if (parse_iso(v) or now) >= cutoff}
+    save_json_file(STATE_FILE, state)
 
 
 # ===========================================================================
@@ -1421,15 +1745,17 @@ def run_once(use_ai: bool = True) -> None:
         feeds_status.append({"name": feed["name"], "category": feed.get("category"), "ok": not error,
                              "items": len(items), "new": len(fresh), "error": error})
         if error:
-            log.warning("  ✗ %-34s %s", feed["name"], error)
+            log.warning("  ✗ %-34s %s", feed["name"][:34], error)
         else:
             log.info("  ✓ %-34s %3d Einträge, %2d neu", feed["name"], len(items), len(fresh))
         for i in fresh:
             (structured if "threat" in i else pending).append(i)
 
+    db["dead_sources"] = update_feed_health(db, feeds_status)
     stamp = iso(now_utc())
+    merged = 0
     for i in structured:
-        db["threats"].append(i["threat"])
+        merged += 0 if add_threat(db, i["threat"]) else 1
         db["seen_ids"][i["id"]] = stamp
     if structured:
         save_db(db, feeds_status, provider)
@@ -1474,16 +1800,22 @@ def run_once(use_ai: bool = True) -> None:
             else:
                 deferred += 1  # nicht als gesehen markieren → nächster Lauf
                 continue
-            db["threats"].append(threat)
+            if add_threat(db, threat):
+                added += 1
+            else:
+                merged += 1
             db["seen_ids"][item["id"]] = stamp
-            added += 1
         save_db(db, feeds_status, provider)
 
     upgraded = upgrade_heuristic(db, ai, feeds_status, provider) if ai else 0
     save_db(db, feeds_status, provider)
-    log.info("Fertig in %.0f s: %d strukturiert, %d analysiert, %d verworfen, %d zurückgestellt, %d nachveredelt. "
-             "Bestand: %d Lagemeldungen.", time.time() - started, len(structured), added, dropped, deferred,
-             upgraded, len(db["threats"]))
+    try:
+        process_notifications(db, db.get("dead_sources", []))
+    except Exception:  # Benachrichtigungen dürfen den Lauf nie abbrechen
+        log.exception("Benachrichtigungen fehlgeschlagen")
+    log.info("Fertig in %.0f s: %d strukturiert, %d analysiert, %d als weitere Quelle angehängt, %d verworfen, "
+             "%d zurückgestellt, %d nachveredelt. Bestand: %d Lagemeldungen.", time.time() - started, len(structured),
+             added, merged, dropped, deferred, upgraded, len(db["threats"]))
 
 
 def upgrade_heuristic(db: dict, ai: AIPool, feeds_status: list[dict], provider: str) -> int:
@@ -1517,6 +1849,8 @@ def upgrade_heuristic(db: dict, ai: AIPool, feeds_status: list[dict], provider: 
             else:
                 new = build_threat(item, r, "ai")
                 new["fetched_at"] = old.get("fetched_at", new["fetched_at"])
+                if old.get("related"):
+                    new["related"] = old["related"]
                 db["threats"] = [new if t["id"] == old["id"] else t for t in db["threats"]]
             upgraded += 1
         save_db(db, feeds_status, provider)
@@ -1582,6 +1916,7 @@ def main() -> None:
     parser.add_argument("--reset", action="store_true", help="threats.json verwerfen")
     parser.add_argument("--skip-first", action="store_true", help="im Loop-Modus erst nach einem Intervall starten")
     parser.add_argument("--setup-ollama", action="store_true", help="lokales KI-Modell herunterladen")
+    parser.add_argument("--test-push", action="store_true", help="Test-Benachrichtigung senden")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -1589,6 +1924,10 @@ def main() -> None:
                         format="%(asctime)s  %(levelname)-7s %(message)s", datefmt="%H:%M:%S")
     if args.setup_ollama:
         sys.exit(setup_ollama())
+    if args.test_push:
+        channels = send_notification("FasTI · Test", "Wenn du das liest, funktionieren die Benachrichtigungen.", 3)
+        print(f"Gesendet über: {', '.join(channels) or 'keinen Kanal'} · ntfy-Topic: {ntfy_topic()}")
+        return
     if args.reset and os.path.exists(DATA_FILE):
         os.remove(DATA_FILE)
         log.info("%s gelöscht.", config.OUTPUT_FILE)

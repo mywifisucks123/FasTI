@@ -88,6 +88,31 @@
   .stage.s2 { background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.6); }
   .stage.s1 { background: rgba(245,158,11,.1); border-color: rgba(245,158,11,.5); }
   .stage.s0 { background: rgba(34,197,94,.07); border-color: rgba(34,197,94,.35); }
+  .tchip.tF { color: #ddd6fe; background: rgba(167,139,250,.14); border-color: rgba(167,139,250,.5); }
+  .trow.hit-F { border-left: 3px solid #a78bfa; }
+  .banner { border: 1px solid; }
+  .banner.warn { background: rgba(245,158,11,.1); border-color: rgba(245,158,11,.45); color: #fde68a; }
+  .banner.info { background: rgba(34,211,238,.07); border-color: rgba(34,211,238,.35); color: #a5f3fc; }
+  .local-card { border: 1px solid var(--line); background: var(--panel); }
+  .local-card.alarm { background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.6); }
+  .ptable td, .ptable th { padding: 5px 6px; border-bottom: 1px solid #1b2433; vertical-align: top; text-align: left; }
+  .ptable th { color: #8494a8; font-weight: 600; font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; }
+  .inp { background: #0b1018; border: 1px solid #1e2938; color: #e2e8f0; border-radius: 6px; padding: 4px 8px; font-size: 12.5px; }
+  .inp:focus { outline: none; border-color: #22d3ee; }
+  .btn { border: 1px solid #334155; background: #131c2a; color: #e2e8f0; border-radius: 6px; padding: 3px 10px; font-size: 12px; }
+  .btn:hover { border-color: #22d3ee; color: #fff; }
+  .btn.primary { background: #0e7490; border-color: #0e7490; } .btn.primary:hover { background: #0891b2; }
+  .home-pin { width: 14px; height: 14px; border-radius: 3px; background: #22d3ee; border: 2px solid #fff; box-shadow: 0 0 10px #22d3ee; }
+  body.map-max #sidePanel { display: none; }
+  body.map-max #mapSection { width: 100%; }
+  #printArea { display: none; }
+  @media print {
+    body > *:not(#printArea) { display: none !important; }
+    #printArea { display: block; color: #000; background: #fff; font: 11pt/1.4 -apple-system, Helvetica, Arial, sans-serif; }
+    #printArea h1 { font-size: 16pt; margin: 0 0 4pt; } #printArea h2 { font-size: 12.5pt; margin: 14pt 0 4pt; }
+    #printArea table { width: 100%; border-collapse: collapse; } #printArea td, #printArea th { border: 1px solid #999; padding: 4pt 5pt; text-align: left; vertical-align: top; }
+    html, body { background: #fff !important; }
+  }
   @media (prefers-reduced-motion: reduce) { .pm .ring, .live-dot, .pm.sel::after { animation: none; } }
 </style>
 </head>
@@ -115,6 +140,10 @@
       <button class="kpi rounded-lg px-3 py-1.5 min-w-[124px] text-left hover:border-[#ef4444]" data-tab="trig" title="Trigger-Monitor öffnen">
         <div class="text-[10px] uppercase tracking-wider text-slate-400">Plan-Trigger A <span class="text-slate-600">30 T</span></div>
         <div class="flex items-baseline gap-1.5"><span id="kpiTrig" class="text-2xl font-semibold mono text-slate-100">–</span><span id="kpiTrigSub" class="text-[11px] text-slate-500">von 2</span></div>
+      </button>
+      <button class="kpi rounded-lg px-3 py-1.5 min-w-[112px] text-left hover:border-[#22d3ee]" data-tab="trig" title="Lage vor Ort im Trigger-Monitor">
+        <div class="text-[10px] uppercase tracking-wider text-slate-400">Vor Ort <span class="text-slate-600" id="kpiLocalLabel">24 h</span></div>
+        <div class="flex items-baseline gap-1.5"><span id="kpiLocal" class="text-2xl font-semibold mono text-slate-100">–</span><span class="text-[11px] text-slate-500">Warnungen</span></div>
       </button>
       <div class="kpi rounded-lg px-3 py-1.5 min-w-[112px]">
         <div class="text-[10px] uppercase tracking-wider text-slate-400">Kritisch <span class="text-slate-600">8–10</span></div>
@@ -151,42 +180,53 @@
         <option value="time">Neueste zuerst</option>
         <option value="severity">Höchste Severity</option>
       </select>
+      <button id="mapMaxBtn" title="Karte groß (Taste M)" class="fbtn rounded-md px-2 py-1.5" aria-label="Karte groß">
+        <svg viewBox="0 0 20 20" class="w-4 h-4" fill="currentColor" aria-hidden="true"><path d="M3.5 4A1.5 1.5 0 0 1 5 2.5h10A1.5 1.5 0 0 1 16.5 4v12a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 16V4Zm1.5 0v12h10V4H5Zm1.5 1.5h7v9h-7v-9Z"/></svg>
+      </button>
+      <button id="fsBtn" title="Vollbild (Taste F)" class="fbtn rounded-md px-2 py-1.5" aria-label="Vollbild">
+        <svg viewBox="0 0 20 20" class="w-4 h-4" fill="currentColor" aria-hidden="true"><path d="M3 3.75A.75.75 0 0 1 3.75 3h4a.75.75 0 0 1 0 1.5H4.5v3.25a.75.75 0 0 1-1.5 0v-4Zm9.5 0a.75.75 0 0 1 .75-.75h3a.75.75 0 0 1 .75.75v4a.75.75 0 0 1-1.5 0V4.5h-2.25a.75.75 0 0 1-.75-.75ZM3.75 12a.75.75 0 0 1 .75.75v2.75h3.25a.75.75 0 0 1 0 1.5h-4a.75.75 0 0 1-.75-.75v-3.5a.75.75 0 0 1 .75-.75Zm12.5 0a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-.75.75h-4a.75.75 0 0 1 0-1.5h3.25v-2.75a.75.75 0 0 1 .75-.75Z"/></svg>
+      </button>
       <button id="refreshBtn" title="Jetzt neu laden" class="fbtn rounded-md px-2 py-1.5" aria-label="Neu laden">
         <svg viewBox="0 0 20 20" class="w-4 h-4" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M15.3 4.7A7 7 0 1 0 17 10a.75.75 0 0 0-1.5 0 5.5 5.5 0 1 1-1.3-3.54l-1.7 1.7h4.25V3.9l-1.45 1.45Z" clip-rule="evenodd"/></svg>
       </button>
     </div>
   </div>
+  <div id="banners" class="px-4 pb-2 space-y-1.5 empty:hidden empty:p-0"></div>
 </header>
 
 <!-- ============================== MAIN ============================== -->
 <main class="flex-1 min-h-0 flex flex-col lg:flex-row">
-  <section class="relative lg:w-[60%] h-[42vh] lg:h-auto shrink-0 border-b lg:border-b-0 lg:border-r border-[#1e2938]">
+  <section id="mapSection" class="relative lg:w-[60%] h-[42vh] lg:h-auto shrink-0 border-b lg:border-b-0 lg:border-r border-[#1e2938]">
     <div id="map" class="absolute inset-0"></div>
     <div class="absolute left-3 bottom-6 z-[500] rounded-lg bg-[#0c111a]/90 border border-[#1e2938] px-3 py-2 text-[11px] text-slate-300 space-y-1 pointer-events-none">
       <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-[#ef4444] shadow-[0_0_8px_#ef4444]"></span>Kritisch (8–10)</div>
       <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-[#f59e0b] shadow-[0_0_8px_#f59e0b]"></span>Hoch (5–7)</div>
       <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-[#3b82f6] shadow-[0_0_8px_#3b82f6]"></span>Info / Niedrig (1–4)</div>
       <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-[2px] bg-[#ef4444] border-2 border-white"></span>Plan-Trigger Liste A</div>
+      <div class="flex items-center gap-2" id="legendHome"><span class="w-2.5 h-2.5 rounded-full border-2 border-dashed border-[#22d3ee]"></span><span>Lage vor Ort</span></div>
       <div id="noGeoNote" class="text-slate-500 pt-1 border-t border-[#1e2938] hidden"></div>
     </div>
   </section>
 
-  <aside class="lg:w-[40%] flex-1 min-h-0 flex flex-col bg-[#0b1018]">
+  <aside id="sidePanel" class="lg:w-[40%] flex-1 min-h-0 flex flex-col bg-[#0b1018]">
     <div class="flex items-end justify-between px-3 border-b border-[#1e2938] text-[12.5px]">
       <div class="flex gap-4" role="tablist">
         <button class="tab on pb-2 pt-2.5" data-tab="feed" id="tabFeed">Threat Feed</button>
         <button class="tab pb-2 pt-2.5" data-tab="trig" id="tabTrig">Trigger-Monitor</button>
+        <button class="tab pb-2 pt-2.5" data-tab="week" id="tabWeek">Wochenlage</button>
       </div>
       <button id="clearSel" class="hidden pb-2 text-[12px] text-[#22d3ee] hover:underline">Auswahl aufheben (Esc)</button>
     </div>
     <div id="feed" class="flex-1 lg:overflow-y-auto px-3 py-3 space-y-2.5" aria-live="polite"></div>
     <div id="trigPanel" class="hidden flex-1 lg:overflow-y-auto px-3 py-3 space-y-3"></div>
+    <div id="weekPanel" class="hidden flex-1 lg:overflow-y-auto px-3 py-3 space-y-3"></div>
     <details class="border-t border-[#1e2938] text-[12px] text-slate-400">
       <summary class="px-4 py-2 cursor-pointer select-none hover:text-slate-200" id="sourcesSummary">Quellen</summary>
       <ul id="sourcesList" class="px-4 pb-3 space-y-1 max-h-48 overflow-y-auto"></ul>
     </details>
   </aside>
 </main>
+<div id="printArea"></div>
 
 <script>
 "use strict";
@@ -209,23 +249,29 @@ const state = {
   data: null, generatedAt: null, threats: [], byId: new Map(),
   cat: "all", minSev: 0, hours: 0, q: "", sort: "time",
   selectedId: null, knownIds: null, newIds: new Set(), lastError: null,
-  tab: "feed", onlyTrig: false, dismissed: new Set(), openTrig: new Set(),
+  tab: "feed", onlyTrig: false, onlyLocal: false, dismissed: new Set(), openTrig: new Set(), openRelated: new Set(),
+  api: false, confirmed: {}, manual: [], maintDone: "", prefs: {}, pushResult: "",
 };
 const TRIG_LISTS = {
   A: { title: "Liste A · harte Trigger", days: 30, note: "Zwei verschiedene Punkte innerhalb von 30 Tagen lösen Stufe 2 aus." },
   B: { title: "Liste B · weiche Indikatoren", days: 14, note: "Lösen nichts aus. Drei oder mehr gleichzeitig über 14 Tage: Liste A täglich prüfen." },
   D: { title: "Diplomatische Signale · Zusatz", days: 14, note: "Nicht Teil des Plans, reine Lageinformation (Botschafter, Botschaften, Reisehinweise)." },
+  F: { title: "Finanzstress · Zusatz", days: 14, note: "Nicht Teil des Plans, reine Lageinformation (Banken, Börsen, Zahlungsverkehr, Zentralbanken)." },
 };
+const MAINT_CHECKLIST = ["Reisepass: Restlaufzeit über 12 Monate – sonst sofort verlängern",
+  "Vollmachten aktuell, unterschrieben, Aufbewahrungsort bekannt", "Bargeldreserve vorhanden und nicht angebrochen",
+  "Vorrat rotiert, Wasser getauscht, Batterien und Gaskartuschen geprüft", "Kontakt- und Triggerliste auf Papier aktuell",
+  "Rechtslage geprüft: § 3 WPflG, Wehrdienstrecht, Genehmigungspraxis", "Krisenplan gelesen und bei Bedarf angepasst"];
 try {
   const saved = JSON.parse(localStorage.getItem("fasti.filters") || "{}");
   Object.assign(state, { cat: saved.cat ?? "all", minSev: saved.minSev ?? 0, hours: saved.hours ?? 0, sort: saved.sort ?? "time",
-                         tab: saved.tab ?? "feed", onlyTrig: !!saved.onlyTrig });
+                         tab: saved.tab ?? "feed", onlyTrig: !!saved.onlyTrig, onlyLocal: !!saved.onlyLocal });
   state.dismissed = new Set(JSON.parse(localStorage.getItem("fasti.dismissed") || "[]"));
 } catch (_) { /* localStorage nicht verfügbar */ }
 function persist() {
   try {
-    localStorage.setItem("fasti.filters", JSON.stringify({ cat: state.cat, minSev: state.minSev, hours: state.hours, sort: state.sort, tab: state.tab, onlyTrig: state.onlyTrig }));
-    localStorage.setItem("fasti.dismissed", JSON.stringify([...state.dismissed]));
+    localStorage.setItem("fasti.filters", JSON.stringify({ cat: state.cat, minSev: state.minSev, hours: state.hours, sort: state.sort, tab: state.tab, onlyTrig: state.onlyTrig, onlyLocal: state.onlyLocal }));
+    if (!state.api) localStorage.setItem("fasti.dismissed", JSON.stringify([...state.dismissed]));
   } catch (_) {}
 }
 
@@ -247,6 +293,23 @@ function ago(iso) {
 }
 const fmtTime = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleString("de-DE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }); };
 const hasGeo = (t) => Number.isFinite(t.latitude) && Number.isFinite(t.longitude);
+const fmtDate = (v) => { const d = v instanceof Date ? v : new Date(v); return isNaN(d) ? "" : d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" }); };
+const DAY = 86400e3;
+function distKm(lat1, lon1, lat2, lon2) {
+  const r = (x) => x * Math.PI / 180, dp = r(lat2 - lat1), dl = r(lon2 - lon1);
+  const a = Math.sin(dp / 2) ** 2 + Math.cos(r(lat1)) * Math.cos(r(lat2)) * Math.sin(dl / 2) ** 2;
+  return 6371 * 2 * Math.asin(Math.sqrt(a));
+}
+const home = () => (state.data && state.data.home) || null;
+function isLocal(t) {
+  if (t.local) return true;
+  const h = home();
+  return !!h && hasGeo(t) && distKm(h.lat, h.lon, t.latitude, t.longitude) <= h.radius_km;
+}
+function localActive(hours = 24) {
+  return state.threats.filter((t) => isLocal(t) && Date.now() - Date.parse(t.timestamp) <= hours * 3600e3)
+    .sort((a, b) => b.severity_score - a.severity_score || b.timestamp.localeCompare(a.timestamp));
+}
 
 /* ---------- Karte ---------- */
 const map = L.map("map", { zoomControl: true, worldCopyJump: true, minZoom: 2, maxZoom: 12, attributionControl: true })
@@ -270,6 +333,18 @@ baseLayer.on("tileerror", () => {
   }).addTo(map);
 });
 const markerLayer = L.layerGroup().addTo(map);
+const homeLayer = L.layerGroup().addTo(map);
+let homeKey = "";
+function renderHome() {
+  const h = home();
+  const key = h ? `${h.lat},${h.lon},${h.radius_km}` : "";
+  if (key === homeKey) return;
+  homeKey = key; homeLayer.clearLayers();
+  $("legendHome").querySelector("span:last-child").textContent = h ? `Lage vor Ort (${h.radius_km} km um ${h.name})` : "Lage vor Ort";
+  if (!h) return;
+  L.circle([h.lat, h.lon], { radius: h.radius_km * 1000, color: "#22d3ee", weight: 1.5, dashArray: "6 6", fillColor: "#22d3ee", fillOpacity: 0.05, interactive: false }).addTo(homeLayer);
+  L.marker([h.lat, h.lon], { icon: L.divIcon({ className: "", html: '<div class="home-pin"></div>', iconSize: [14, 14], iconAnchor: [7, 7] }), keyboard: false, title: h.name }).addTo(homeLayer);
+}
 const markers = new Map();
 let fittedOnce = false;
 
@@ -331,7 +406,7 @@ function matchesQuery(t) {
 function baseSet() { return state.threats.filter((t) => inTime(t) && matchesQuery(t)); }
 function visibleSet() {
   const list = baseSet().filter((t) => (state.cat === "all" || t.category === state.cat) && t.severity_score >= state.minSev
-    && (!state.onlyTrig || activeTrig(t).length));
+    && (!state.onlyTrig || activeTrig(t).length) && (!state.onlyLocal || isLocal(t)));
   return list.sort(state.sort === "severity"
     ? (a, b) => b.severity_score - a.severity_score || b.timestamp.localeCompare(a.timestamp)
     : (a, b) => b.timestamp.localeCompare(a.timestamp) || b.severity_score - a.severity_score);
@@ -345,7 +420,9 @@ function renderFilters() {
       ${k !== "all" ? `<span style="color:${state.cat === k ? "inherit" : "var(--k)"}">${catIcon(k)}</span>` : ""}${esc(label)} <span class="cnt mono">${count(k)}</span></button>`).join("");
   const trigCount = base.filter((t) => activeTrig(t).length).length;
   $("catFilters").innerHTML += `<button class="fbtn rounded-md px-2.5 py-1 text-[12.5px] flex items-center gap-1.5 ${state.onlyTrig ? "on" : ""}" data-trigonly="1" title="Nur Meldungen mit Plan-Trigger oder diplomatischem Signal">
-      <span class="tchip tA rounded px-1 text-[9.5px] leading-[14px]">A/B</span>Nur Trigger <span class="cnt mono">${trigCount}</span></button>`;
+      <span class="tchip tA rounded px-1 text-[9.5px] leading-[14px]">A/B</span>Nur Trigger <span class="cnt mono">${trigCount}</span></button>
+    <button class="fbtn rounded-md px-2.5 py-1 text-[12.5px] flex items-center gap-1.5 ${state.onlyLocal ? "on" : ""}" data-localonly="1" title="Nur Meldungen im Umkreis der Lage vor Ort">
+      <span class="w-2.5 h-2.5 rounded-full border-2 border-dashed border-[#22d3ee]"></span>Vor Ort <span class="cnt mono">${base.filter(isLocal).length}</span></button>`;
   $("sevFilters").innerHTML = SEV_FILTERS.map((f) =>
     `<button class="fbtn rounded-md px-2.5 py-1 text-[12.5px] ${state.minSev === f.k ? "on" : ""}" data-sev="${f.k}">${esc(f.label)}</button>`).join("");
   $("timeFilters").innerHTML = TIME_FILTERS.map((f) =>
@@ -360,88 +437,338 @@ function renderKpis(visible) {
   $("kpiCats").textContent = new Set(scope.map((t) => t.category)).size;
   $("kpiTotal").textContent = visible.length;
   $("kpiTotalSub").textContent = `von ${state.threats.length}`;
+  const loc = localActive(24), maxLoc = loc.length ? loc[0].severity_score : 0;
+  $("kpiLocal").textContent = loc.length;
+  $("kpiLocal").style.color = maxLoc >= 8 ? "var(--crit)" : maxLoc >= 5 ? "var(--high)" : loc.length ? "var(--accent)" : "#e2e8f0";
   const a = triggerPoints("A").length;
   $("kpiTrig").textContent = a;
   $("kpiTrig").style.color = a >= 2 ? "var(--crit)" : a === 1 ? "var(--high)" : "#e2e8f0";
 }
 
+/* ---------- Entscheidungen (Protokoll, Verwerfungen, Wartung) – gespeichert über server.py ---------- */
+const DEC_URL = "api/decisions";
+function applyDecisions(d) {
+  state.dismissed = new Set(d.dismissed || []);
+  state.confirmed = d.confirmed || {}; state.manual = d.manual || [];
+  state.maintDone = d.maintenance_done || ""; state.prefs = d.prefs || {};
+}
+async function loadDecisions() {
+  try {
+    const res = await fetch(`${DEC_URL}?t=${Date.now()}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const d = await res.json();
+    const local = [...state.dismissed].filter((k) => !(d.dismissed || []).includes(k));
+    state.api = true;
+    applyDecisions(d);
+    if (local.length) await decide({ action: "import_dismissed", keys: local }, false);
+    try { localStorage.removeItem("fasti.dismissed"); } catch (_) {}
+  } catch (_) { state.api = false; }
+}
+async function decide(payload, rerender = true) {
+  if (!state.api) {  // Fallback ohne server.py: nur Verwerfen im Browser möglich
+    if (payload.action === "dismiss") state.dismissed.add(payload.key);
+    else if (payload.action === "undismiss") state.dismissed.delete(payload.key);
+    else alert("Protokoll und Wartung brauchen den FasTI-Server – bitte über start.sh starten.");
+    persist();
+    return rerender && render();
+  }
+  try {
+    const res = await fetch(DEC_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    applyDecisions(await res.json());
+  } catch (err) { alert("Speichern fehlgeschlagen: " + err.message); }
+  if (rerender) render();
+}
+
 /* ---------- Trigger-Monitor (Krisen-Entscheidungsplan) ---------- */
 const trigKey = (t, tid) => `${t.id}:${tid}`;
+const confirmedOnly = () => !!state.prefs.countConfirmedOnly;
+function counts(t, tid) {
+  const k = trigKey(t, tid);
+  return !state.dismissed.has(k) && (!confirmedOnly() || !!state.confirmed[k]);
+}
 function activeTrig(t) { return (t.triggers || []).filter((tid) => !state.dismissed.has(trigKey(t, tid))); }
 function trigDefs() { return (state.data && state.data.triggers) || []; }
 function trigDef(tid) { return trigDefs().find((d) => d.id === tid) || { id: tid, list: tid[0], label: tid }; }
 function hitsFor(tid, days, includeDismissed = false) {
-  const cutoff = Date.now() - days * 86400e3;
+  const cutoff = Date.now() - days * DAY;
   return state.threats.filter((t) => (t.triggers || []).includes(tid) && Date.parse(t.timestamp) >= cutoff
-    && (includeDismissed || !state.dismissed.has(trigKey(t, tid))))
+    && (includeDismissed || counts(t, tid)))
     .sort((x, y) => y.timestamp.localeCompare(x.timestamp));
 }
-function triggerPoints(list) {
-  return trigDefs().filter((d) => d.list === list && hitsFor(d.id, TRIG_LISTS[list].days).length);
+function manualHits(tid, days) {
+  const cutoff = Date.now() - days * DAY;
+  return state.manual.filter((m) => m.trigger === tid && Date.parse(m.event_date) >= cutoff);
+}
+function pointDates(tid, days) {
+  return [...hitsFor(tid, days).map((t) => Date.parse(t.timestamp)), ...manualHits(tid, days).map((m) => Date.parse(m.event_date))];
+}
+function triggerPoints(list, days) {
+  return trigDefs().filter((d) => d.list === list && pointDates(d.id, days ?? TRIG_LISTS[list].days).length);
 }
 function trigChip(t, tid) {
-  const d = trigDef(tid), off = state.dismissed.has(trigKey(t, tid));
-  return `<span class="tchip t${esc(d.list)} ${off ? "off" : ""} rounded px-1.5 py-0.5 text-[10.5px] mono" title="${esc(d.label)}${off ? " (verworfen)" : ""}">${esc(tid)}</span>`;
+  const d = trigDef(tid), off = state.dismissed.has(trigKey(t, tid)), ok = !!state.confirmed[trigKey(t, tid)];
+  return `<span class="tchip t${esc(d.list)} ${off ? "off" : ""} rounded px-1.5 py-0.5 text-[10.5px] mono" title="${esc(d.label)}${off ? " (verworfen)" : ok ? " (bestätigt)" : ""}">${esc(tid)}${ok ? " ✓" : ""}</span>`;
 }
+
+function getStage() {
+  const a = triggerPoints("A"), b = triggerPoints("B");
+  const aDates = a.flatMap((d) => pointDates(d.id, 30));
+  const allA = trigDefs().filter((d) => d.list === "A").flatMap((d) => pointDates(d.id, 45));
+  const lastA = allA.length ? Math.max(...allA) : null;
+  const firstA = aDates.length ? Math.min(...aDates) : null;
+  let st;
+  if (a.length >= 2) st = { cls: "s2", head: "Stufe 2 · Entscheidungspunkt",
+    text: `${a.length} verschiedene Punkte aus Liste A innerhalb von 30 Tagen (${a.map((d) => d.id).join(", ")}). Jeden Treffer an der Originalquelle verifizieren. Bestätigt: binnen 24–48 h die drei Fragen beantworten und entscheiden.`,
+    rhythm: "2× täglich bis zur Entscheidung · zusätzlich Tagesordnung Bundestag und NATO-Pressemeldungen" };
+  else if (a.length === 1) st = { cls: "s1", head: `1 Punkt aus Liste A · ${a[0].id}`,
+    text: `Seit ${fmtTime(new Date(firstA).toISOString())}. Verifizieren, mit Datum ins Ereignisprotokoll eintragen und ab jetzt täglich neu bewerten. Ein zweiter Punkt innerhalb von 30 Tagen bedeutet Stufe 2.`,
+    rhythm: "täglich, 10 Minuten · Liste A neu bewerten, zusätzlich Reisehinweise auf auswaertiges-amt.de" };
+  else st = { cls: "s0", head: "Kein Punkt aus Liste A in den letzten 30 Tagen",
+    text: "Stufe 0–1. Vorbereitung aktuell halten, sonst keine Veränderung.",
+    rhythm: b.length >= 3 ? "täglich, 10 Minuten · zusätzlich Reisehinweise auf auswaertiges-amt.de (Liste B: 3+ Indikatoren)"
+                          : "1× pro Woche, 10 Minuten · Tagesschau, NINA-App, bbk.bund.de" };
+  if (lastA && Date.now() - lastA < 30 * DAY)
+    st.entw = `Entwarnung frühestens am ${fmtDate(new Date(lastA + 30 * DAY))} – sofern bis dahin kein neuer A-Punkt, keine laufende Bundestagsbefassung und keine Ausreiseaufrufe des Auswärtigen Amts für Nachbarstaaten.`;
+  else if (lastA)
+    st.entw = `Seit ${fmtDate(new Date(lastA))} kein neuer A-Punkt: Entwarnung möglich – Datum notieren, Thema schließen, nächste Prüfung zum Halbjahrestermin.`;
+  st.a = a; st.b = b;
+  return st;
+}
+function stageAfter(list, tid) {
+  if (list !== "A") return "unverändert";
+  const ids = new Set(trigDefs().filter((d) => d.list === "A")
+    .filter((d) => Object.entries(state.confirmed).some(([k, c]) => c.trigger === d.id && Date.now() - Date.parse(c.event_date) <= 30 * DAY)
+                || manualHits(d.id, 30).length).map((d) => d.id));
+  ids.add(tid);
+  return ids.size >= 2 ? "Stufe 2" : "Stufe 1 (A-Punkt notiert)";
+}
+
+function maintenanceInfo() {
+  const now = new Date(), y = now.getFullYear();
+  const dates = [new Date(y - 1, 8, 27), new Date(y, 2, 27), new Date(y, 8, 27), new Date(y + 1, 2, 27)];
+  const lastDue = dates.filter((d) => d <= now).pop(), next = dates.find((d) => d > now);
+  const done = state.maintDone ? new Date(state.maintDone + "T12:00:00") : null;
+  return { due: !done || done < lastDue, lastDue, next, done };
+}
+
+function renderBanners() {
+  const out = [];
+  const dead = (state.data && state.data.dead_sources) || [];
+  if (dead.length) out.push(`<div class="banner warn rounded-md px-3 py-1.5 text-[12px]"><b>Blinder Fleck:</b> ${dead.map((d) => esc(d.name)).join(", ")} ${dead.length === 1 ? "liefert" : "liefern"} seit über ${(state.data.dead_after_hours || 24)} Stunden keine Daten. Trigger aus diesen Quellen werden gerade nicht erkannt.</div>`);
+  const m = maintenanceInfo();
+  if (state.api && m.due) out.push(`<div class="banner info rounded-md px-3 py-1.5 text-[12px] flex flex-wrap items-center gap-2"><span><b>Halbjährlicher Wartungscheck fällig</b> (Termin ${fmtDate(m.lastDue)}, ca. 20 Minuten): ${MAINT_CHECKLIST.map(esc).join(" · ")}</span><button class="btn primary ml-auto" data-maint="1">Erledigt</button></div>`);
+  $("banners").innerHTML = out.join("");
+}
+
+function hitRow(t, d) {
+  const k = trigKey(t, d.id), off = state.dismissed.has(k), ok = !!state.confirmed[k], url = safeUrl(t.source_url);
+  return `<div class="rounded bg-[#0b1018] border ${ok ? "border-[#22c55e]/60" : "border-[#1b2433]"} px-2 py-1.5 text-[12px] ${off ? "opacity-50" : ""}">
+    <button class="text-left text-slate-200 hover:text-[#22d3ee] ${off ? "line-through" : ""}" data-goto="${esc(t.id)}">${esc(t.title)}</button>
+    <div class="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1 text-[11px] text-slate-500">
+      <span>${esc(fmtTime(t.timestamp))}</span><span>·</span><span class="truncate max-w-[180px]">${esc(t.source_name)}</span>
+      ${url ? `<a class="text-[#22d3ee] hover:underline" href="${esc(url)}" target="_blank" rel="noopener noreferrer">Quelle prüfen</a>` : ""}
+      <span class="ml-auto flex gap-2">
+        ${off ? "" : `<button class="${ok ? "text-[#4ade80]" : "hover:text-white"}" data-confirm="${esc(k)}">${ok ? "✓ bestätigt (zurücknehmen)" : "Bestätigen → Protokoll"}</button>`}
+        ${ok ? "" : `<button class="hover:text-white" data-dismiss="${esc(k)}">${off ? "Wiederherstellen" : "Fehlalarm verwerfen"}</button>`}
+      </span>
+    </div></div>`;
+}
+
+function protocolRows() {
+  const rows = [
+    ...Object.entries(state.confirmed).map(([k, c]) => ({ kind: "c", key: k, ...c })),
+    ...state.manual.map((m) => ({ kind: "m", key: m.id, ...m })),
+  ];
+  return rows.sort((x, y) => String(y.event_date).localeCompare(String(x.event_date)));
+}
+function protocolTable(forPrint = false) {
+  const rows = protocolRows();
+  if (!rows.length) return forPrint ? "<p>Keine Einträge.</p>" : `<p class="text-[12px] text-slate-500">Noch keine Einträge. Treffer mit „Bestätigen“ übernehmen oder manuell eintragen.</p>`;
+  return `<table class="${forPrint ? "" : "ptable w-full text-[12px]"}"><thead><tr><th>Datum</th><th>Ereignis</th><th>Liste</th><th>Stufe danach</th>${forPrint ? "" : "<th></th>"}</tr></thead><tbody>
+    ${rows.map((r) => {
+      const url = safeUrl(r.source_url);
+      return `<tr><td class="whitespace-nowrap">${esc(fmtDate(r.event_date))}</td>
+        <td>${url && !forPrint ? `<a class="hover:text-[#22d3ee]" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(r.title)}</a>` : esc(r.title)}${r.note ? `<div class="text-slate-500">${esc(r.note)}</div>` : ""}</td>
+        <td class="whitespace-nowrap">${esc(r.trigger || r.list || "–")}</td><td>${esc(r.stage_after || "")}</td>
+        ${forPrint ? "" : `<td><button class="text-slate-500 hover:text-white" title="Eintrag entfernen" data-protodel="${esc(r.kind)}:${esc(r.key)}">✕</button></td>`}</tr>`;
+    }).join("")}</tbody></table>`;
+}
+
 function renderTriggers() {
   const panel = $("trigPanel");
   if (!state.data) return;
-  const a = triggerPoints("A"), b = triggerPoints("B");
-  const firstA = a.map((d) => hitsFor(d.id, 30).slice(-1)[0]).filter(Boolean).sort((x, y) => x.timestamp.localeCompare(y.timestamp))[0];
-  let stage;
-  if (a.length >= 2) stage = { cls: "s2", head: "Stufe 2 · Entscheidungspunkt",
-    text: `${a.length} verschiedene Punkte aus Liste A innerhalb von 30 Tagen (${a.map((d) => d.id).join(", ")}). Jeden Treffer an der Originalquelle verifizieren. Bestätigt: binnen 24–48 h die drei Fragen beantworten und entscheiden.` };
-  else if (a.length === 1) stage = { cls: "s1", head: `1 Punkt aus Liste A · ${esc(a[0].id)}`,
-    text: `Seit ${fmtTime(firstA && firstA.timestamp)}. Verifizieren, mit Datum ins Ereignisprotokoll eintragen und ab jetzt täglich neu bewerten. Ein zweiter Punkt innerhalb von 30 Tagen bedeutet Stufe 2.` };
-  else stage = { cls: "s0", head: "Kein Punkt aus Liste A in den letzten 30 Tagen",
-    text: "Stufe 0–1. Prüfrhythmus laut Plan: einmal pro Woche, 10 Minuten." };
-  const bNote = b.length >= 3
-    ? `<div class="mt-2 text-[12px] text-[#fde68a]">Liste B: ${b.length} Indikatoren aktiv in 14 Tagen (${b.map((d) => d.id).join(", ")}). Halten sie länger als 14 Tage an, Liste A täglich statt wöchentlich prüfen.</div>`
-    : `<div class="mt-2 text-[12px] text-slate-400">Liste B: ${b.length} von 7 Indikatoren in 14 Tagen aktiv${b.length ? ` (${b.map((d) => d.id).join(", ")})` : ""}.</div>`;
+  const st = getStage();
+  const bNote = st.b.length >= 3
+    ? `<div class="mt-2 text-[12px] text-[#fde68a]">Liste B: ${st.b.length} Indikatoren aktiv in 14 Tagen (${st.b.map((d) => d.id).join(", ")}). Halten sie länger als 14 Tage an, Liste A täglich statt wöchentlich prüfen.</div>`
+    : `<div class="mt-2 text-[12px] text-slate-400">Liste B: ${st.b.length} von 7 Indikatoren in 14 Tagen aktiv${st.b.length ? ` (${st.b.map((d) => d.id).join(", ")})` : ""}.</div>`;
+  const m = maintenanceInfo();
+
+  // Lage vor Ort (Stufe 5)
+  const h = home(), loc = localActive(24), alarm = loc.some((t) => t.severity_score >= 7);
+  const localCard = h ? `<div class="local-card ${alarm ? "alarm" : ""} rounded-lg px-3.5 py-3">
+      <div class="flex items-baseline justify-between"><div class="text-[11px] uppercase tracking-wider text-slate-400">Lage vor Ort · ${h.radius_km} km um ${esc(h.name)} · 24 h</div>
+      <button class="text-[11px] text-[#22d3ee] hover:underline" data-localonly="1">${state.onlyLocal ? "Filter aus" : "Im Feed zeigen"}</button></div>
+      ${alarm ? `<div class="text-[14px] font-semibold text-white mt-1">Stufe 5 prüfen: Behördenanweisungen über NINA und Radio befolgen</div>` : ""}
+      ${loc.length ? `<ul class="mt-1.5 space-y-1">${loc.slice(0, 8).map((t) => `<li class="text-[12.5px] flex gap-2">
+          <span class="sev-pill sev-${sevClass(t.severity_score)} mono rounded px-1 text-[10.5px] h-fit">${t.severity_score}</span>
+          <button class="text-left text-slate-200 hover:text-[#22d3ee]" data-goto="${esc(t.id)}">${esc(t.title)}</button>
+          ${/\bA\s?2\b/.test(`${t.title} ${t.impact_summary}`) ? '<span class="tchip tB rounded px-1 text-[10px] mono h-fit" title="Hauptverlegungsachse laut Plan">A2</span>' : ""}</li>`).join("")}</ul>`
+        : `<div class="text-[12.5px] text-slate-400 mt-1">Keine Warnungen im Umkreis.</div>`}
+    </div>` : "";
 
   const section = (list) => {
     const cfg = TRIG_LISTS[list];
     const defs = trigDefs().filter((d) => d.list === list);
+    if (!defs.length) return "";
     const rows = defs.map((d) => {
-      const hits = hitsFor(d.id, cfg.days, true), active = hits.filter((t) => !state.dismissed.has(trigKey(t, d.id)));
+      const hits = hitsFor(d.id, cfg.days, true), active = hits.filter((t) => counts(t, d.id));
+      const man = manualHits(d.id, cfg.days);
+      const n = active.length + man.length;
+      const latest = [...active.map((t) => t.timestamp), ...man.map((x) => x.event_date)].sort().pop();
       const open = state.openTrig.has(d.id);
-      return `<div class="trow ${active.length ? "hit-" + list : ""} rounded-md">
+      return `<div class="trow ${n ? "hit-" + list : ""} rounded-md">
         <button class="w-full flex items-start gap-2 px-2.5 py-2 text-left" data-toggle-trig="${esc(d.id)}" ${hits.length ? "" : "disabled"}>
-          <span class="tchip t${list} rounded px-1.5 text-[10.5px] mono mt-0.5 ${active.length ? "" : "opacity-40"}">${esc(d.id)}</span>
-          <span class="flex-1 text-[12.5px] leading-snug ${active.length ? "text-slate-100" : "text-slate-400"}">${esc(d.label)}</span>
-          <span class="mono text-[11px] whitespace-nowrap ${active.length ? "text-white" : "text-slate-600"}">${active.length ? `${active.length}× · ${esc(ago(active[0].timestamp))}` : "–"}</span>
+          <span class="tchip t${list} rounded px-1.5 text-[10.5px] mono mt-0.5 ${n ? "" : "opacity-40"}">${esc(d.id)}</span>
+          <span class="flex-1 text-[12.5px] leading-snug ${n ? "text-slate-100" : "text-slate-400"}">${esc(d.label)}</span>
+          <span class="mono text-[11px] whitespace-nowrap ${n ? "text-white" : "text-slate-600"}">${n ? `${n}× · ${esc(ago(latest))}` : "–"}</span>
         </button>
-        ${open && hits.length ? `<div class="px-2.5 pb-2 space-y-1.5">${hits.map((t) => {
-          const off = state.dismissed.has(trigKey(t, d.id)), url = safeUrl(t.source_url);
-          return `<div class="rounded bg-[#0b1018] border border-[#1b2433] px-2 py-1.5 text-[12px] ${off ? "opacity-50" : ""}">
-            <button class="text-left text-slate-200 hover:text-[#22d3ee] ${off ? "line-through" : ""}" data-goto="${esc(t.id)}">${esc(t.title)}</button>
-            <div class="flex items-center gap-2 mt-1 text-[11px] text-slate-500">
-              <span>${esc(fmtTime(t.timestamp))}</span><span>·</span><span class="truncate">${esc(t.source_name)}</span>
-              ${url ? `<a class="text-[#22d3ee] hover:underline" href="${esc(url)}" target="_blank" rel="noopener noreferrer">Quelle prüfen</a>` : ""}
-              <button class="ml-auto hover:text-white" data-dismiss="${esc(trigKey(t, d.id))}">${off ? "Wiederherstellen" : "Fehlalarm verwerfen"}</button>
-            </div></div>`;
-        }).join("")}</div>` : ""}
+        ${open && hits.length ? `<div class="px-2.5 pb-2 space-y-1.5">${hits.map((t) => hitRow(t, d)).join("")}</div>` : ""}
       </div>`;
     }).join("");
     return `<section><div class="flex items-baseline justify-between mb-1.5"><h3 class="text-[12px] font-semibold uppercase tracking-wider text-slate-300">${esc(cfg.title)}</h3>
       <span class="text-[10.5px] text-slate-500">Fenster ${cfg.days} Tage</span></div>
       <p class="text-[11.5px] text-slate-500 mb-2">${esc(cfg.note)}</p><div class="space-y-1.5">${rows}</div></section>`;
   };
+
+  const today = new Date().toISOString().slice(0, 10);
+  const notify = state.data.notify || {};
   panel.innerHTML = `
-    <div class="stage ${stage.cls} rounded-lg px-3.5 py-3">
-      <div class="text-[11px] uppercase tracking-wider text-slate-400 mb-0.5">Einschätzung nach Krisen-Entscheidungsplan</div>
-      <div class="text-[15px] font-semibold text-white">${stage.head}</div>
-      <div class="text-[12.5px] text-slate-300 mt-1 leading-relaxed">${esc(stage.text)}</div>${bNote}
+    <div class="stage ${st.cls} rounded-lg px-3.5 py-3">
+      <div class="text-[11px] uppercase tracking-wider text-slate-400 mb-0.5">Einschätzung nach Krisen-Entscheidungsplan${confirmedOnly() ? " · nur bestätigte Treffer" : ""}</div>
+      <div class="text-[15px] font-semibold text-white">${esc(st.head)}</div>
+      <div class="text-[12.5px] text-slate-300 mt-1 leading-relaxed">${esc(st.text)}</div>${bNote}
+      <div class="mt-2 pt-2 border-t border-white/10 text-[12px] text-slate-300 space-y-1">
+        <div><span class="text-slate-500">Prüfrhythmus:</span> ${esc(st.rhythm)}</div>
+        ${st.entw ? `<div><span class="text-slate-500">Entwarnung:</span> ${esc(st.entw)}</div>` : ""}
+        <div><span class="text-slate-500">Wartungscheck:</span> ${m.due ? `<span class="text-[#a5f3fc]">fällig seit ${fmtDate(m.lastDue)}</span>` : `erledigt am ${fmtDate(m.done)} · nächster am ${fmtDate(m.next)}`}</div>
+      </div>
     </div>
-    <p class="text-[11px] text-slate-500 leading-relaxed">Automatische Erkennung per KI und Regeln, jeder Treffer ist ein Kandidat. Vor dem Eintrag ins Ereignisprotokoll an der Originalquelle verifizieren; Fehlalarme verwerfen (wird in diesem Browser gespeichert). Stufe 3–5 stellen Bundestag, NATO und NINA fest, nicht dieses Tool.</p>
-    ${section("A")}${section("B")}${section("D")}`;
+    ${localCard}
+    <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500 leading-relaxed">
+      <span class="flex-1 min-w-[220px]">Automatische Erkennung per KI und Regeln, jeder Treffer ist ein Kandidat: an der Originalquelle verifizieren, dann bestätigen oder verwerfen. Stufe 3–5 stellen Bundestag, NATO und NINA fest, nicht dieses Tool.</span>
+      <label class="flex items-center gap-1.5 text-slate-300 cursor-pointer"><input type="checkbox" data-pref="countConfirmedOnly" ${confirmedOnly() ? "checked" : ""}> Nur bestätigte Treffer zählen</label>
+    </div>
+    <section>
+      <div class="flex items-baseline justify-between mb-1.5"><h3 class="text-[12px] font-semibold uppercase tracking-wider text-slate-300">Ereignisprotokoll</h3>
+        <button class="btn" data-print="protocol">Drucken</button></div>
+      ${protocolTable()}
+      <details class="mt-2"><summary class="text-[12px] text-[#22d3ee] cursor-pointer">Eintrag manuell hinzufügen</summary>
+        <div class="flex flex-wrap gap-2 mt-2 items-center">
+          <input type="date" class="inp" id="manDate" value="${today}">
+          <select class="inp" id="manTrig"><option value="">– Liste/Trigger –</option>${trigDefs().map((d) => `<option value="${esc(d.id)}">${esc(d.id)} · ${esc(d.label.slice(0, 50))}</option>`).join("")}</select>
+          <input class="inp flex-1 min-w-[200px]" id="manTitle" placeholder="Ereignis (z. B. Quelle, Kurzbeschreibung)">
+          <input class="inp w-40" id="manStage" placeholder="Stufe danach">
+          <button class="btn primary" data-manadd="1">Eintragen</button>
+        </div></details>
+    </section>
+    ${section("A")}${section("B")}${section("D")}${section("F")}
+    <section class="rounded-lg border border-[#1e2938] px-3.5 py-3 text-[12px] text-slate-300">
+      <h3 class="text-[12px] font-semibold uppercase tracking-wider text-slate-300 mb-1.5">Push aufs iPhone</h3>
+      ${notify.ntfy_enabled && notify.ntfy_topic ? `<ol class="list-decimal ml-4 space-y-0.5">
+        <li>App <b>ntfy</b> aus dem App Store laden und Mitteilungen erlauben.</li>
+        <li>In der App auf <b>+</b> tippen, als Thema eingeben: <span class="mono text-[#a5f3fc] select-all">${esc(notify.ntfy_topic)}</span> (Server: ${esc(notify.ntfy_server)}).</li>
+        <li>Test senden: <button class="btn" data-testpush="1">Test-Push senden</button> <span class="text-slate-400">${esc(state.pushResult)}</span></li></ol>
+        <p class="text-slate-500 mt-1.5">Gemeldet werden neue Treffer der Listen ${esc((notify.lists || ["A"]).join(", "))}, der Wechsel auf Stufe 2, Unwetter- und Gefahrenwarnungen vor Ort sowie ausgefallene Quellen. Das Thema wirkt wie ein Passwort – nicht weitergeben.</p>`
+        : `<p class="text-slate-500">Push ist in config.py ausgeschaltet (NTFY_ENABLED).</p>`}
+    </section>`;
 }
+
+/* ---------- Wochenlage ---------- */
+function weekReport() {
+  const now = Date.now(), W = 7 * DAY;
+  const age = (t) => now - Date.parse(t.timestamp);
+  const cur = state.threats.filter((t) => age(t) <= W), prev = state.threats.filter((t) => age(t) > W && age(t) <= 2 * W);
+  const pts = (list, from, to) => trigDefs().filter((d) => d.list === list && (state.threats.some((t) =>
+    (t.triggers || []).includes(d.id) && counts(t, d.id) && age(t) > from && age(t) <= to)
+    || state.manual.some((m) => m.trigger === d.id && now - Date.parse(m.event_date) > from && now - Date.parse(m.event_date) <= to + DAY)))
+    .map((d) => d.id);
+  const lists = ["A", "B", "D", "F"].map((l) => ({ l, now: pts(l, 0, W), before: pts(l, W, 2 * W) }));
+  const top = [...cur].sort((a, b) => b.severity_score - a.severity_score || b.timestamp.localeCompare(a.timestamp)).slice(0, 10);
+  const local = cur.filter(isLocal);
+  return { cur, prev, lists, top, local, st: getStage(), from: new Date(now - W), to: new Date(now) };
+}
+function renderWeek() {
+  if (!state.data) return;
+  const r = weekReport();
+  const delta = (a, b) => { const d = a - b; return d === 0 ? '<span class="text-slate-500">±0</span>' : `<span class="${d > 0 ? "text-[#fca5a5]" : "text-[#86efac]"}">${d > 0 ? "+" : ""}${d}</span>`; };
+  $("weekPanel").innerHTML = `
+    <div class="flex items-baseline justify-between"><div><div class="text-[11px] uppercase tracking-wider text-slate-400">Wochenlage</div>
+      <div class="text-[15px] font-semibold text-white">${fmtDate(r.from)} – ${fmtDate(r.to)}</div></div>
+      <button class="btn" data-print="week">Drucken</button></div>
+    <div class="stage ${r.st.cls} rounded-lg px-3.5 py-2.5"><div class="text-[14px] font-semibold text-white">${esc(r.st.head)}</div>
+      <div class="text-[12px] text-slate-300 mt-0.5">Prüfrhythmus: ${esc(r.st.rhythm)}</div></div>
+    <section><h3 class="text-[12px] font-semibold uppercase tracking-wider text-slate-300 mb-1.5">Trigger gegenüber Vorwoche</h3>
+      <div class="grid grid-cols-2 gap-1.5">${r.lists.map(({ l, now, before }) => {
+        const neu = now.filter((x) => !before.includes(x));
+        return `<div class="trow ${now.length ? "hit-" + l : ""} rounded-md px-2.5 py-2"><div class="text-[11px] text-slate-400">${esc(TRIG_LISTS[l].title.split(" · ")[0])}</div>
+          <div class="text-[18px] font-semibold mono text-white">${now.length} <span class="text-[12px]">${delta(now.length, before.length)}</span></div>
+          <div class="text-[11px] text-slate-400">${now.length ? now.map(esc).join(", ") : "keine"}${neu.length ? ` · <span class="text-white">neu: ${neu.map(esc).join(", ")}</span>` : ""}</div></div>`;
+      }).join("")}</div></section>
+    <section><h3 class="text-[12px] font-semibold uppercase tracking-wider text-slate-300 mb-1.5">Meldungen nach Kategorie</h3>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-1.5">${Object.entries(CATS).map(([k, v]) => {
+        const a = r.cur.filter((t) => t.category === k).length, b = r.prev.filter((t) => t.category === k).length;
+        const crit = r.cur.filter((t) => t.category === k && t.severity_score >= 8).length;
+        return `<div class="trow cat-${k} rounded-md px-2.5 py-2"><div class="text-[11px]" style="color:var(--k)">${esc(v.label)}</div>
+          <div class="text-[18px] font-semibold mono text-white">${a} <span class="text-[12px]">${delta(a, b)}</span></div>
+          <div class="text-[11px] text-slate-500">${crit} kritisch</div></div>`;
+      }).join("")}</div></section>
+    <section><h3 class="text-[12px] font-semibold uppercase tracking-wider text-slate-300 mb-1.5">Die 10 schwersten Ereignisse</h3>
+      <ol class="space-y-1">${r.top.map((t) => `<li class="flex gap-2 text-[12.5px]"><span class="sev-pill sev-${sevClass(t.severity_score)} mono rounded px-1 text-[10.5px] h-fit">${t.severity_score}</span>
+        <button class="text-left text-slate-200 hover:text-[#22d3ee]" data-goto="${esc(t.id)}">${esc(t.title)}</button>
+        <span class="ml-auto text-[11px] text-slate-500 whitespace-nowrap">${esc(fmtDate(t.timestamp))}${(t.related || []).length ? ` · ${t.related.length + 1} Quellen` : ""}</span></li>`).join("") || '<li class="text-slate-500 text-[12px]">Keine Meldungen.</li>'}</ol></section>
+    <section><h3 class="text-[12px] font-semibold uppercase tracking-wider text-slate-300 mb-1.5">Lage vor Ort</h3>
+      <p class="text-[12.5px] text-slate-300">${r.local.length} Meldung(en) im Umkreis${r.local.length ? `, höchste Severity ${Math.max(...r.local.map((t) => t.severity_score))}` : ""}.</p></section>`;
+}
+function weekPrintHtml() {
+  const r = weekReport();
+  return `<h1>FasTI · Wochenlage ${fmtDate(r.from)} – ${fmtDate(r.to)}</h1>
+    <p><b>${esc(r.st.head)}</b><br>Prüfrhythmus: ${esc(r.st.rhythm)}${r.st.entw ? `<br>Entwarnung: ${esc(r.st.entw)}` : ""}</p>
+    <h2>Trigger</h2><table><tr><th>Liste</th><th>Diese Woche</th><th>Vorwoche</th></tr>${r.lists.map(({ l, now, before }) =>
+      `<tr><td>${esc(TRIG_LISTS[l].title)}</td><td>${now.join(", ") || "–"}</td><td>${before.join(", ") || "–"}</td></tr>`).join("")}</table>
+    <h2>Die 10 schwersten Ereignisse</h2><table><tr><th>Datum</th><th>Sev.</th><th>Ereignis</th><th>Ort</th></tr>${r.top.map((t) =>
+      `<tr><td>${esc(fmtDate(t.timestamp))}</td><td>${t.severity_score}</td><td>${esc(t.title)}</td><td>${esc(t.location_name)}</td></tr>`).join("")}</table>
+    <h2>Ereignisprotokoll</h2>${protocolTable(true)}`;
+}
+function printView(kind) {
+  $("printArea").innerHTML = kind === "week" ? weekPrintHtml()
+    : `<h1>Krisen-Entscheidungsplan · Ereignisprotokoll</h1><p>Stand ${esc(fmtTime(new Date().toISOString()))} · ${esc(getStage().head)}</p>${protocolTable(true)}`;
+  window.print();
+}
+
 function setTab(tab) {
-  state.tab = tab; persist();
-  $("feed").classList.toggle("hidden", tab !== "feed");
-  $("trigPanel").classList.toggle("hidden", tab !== "trig");
-  $("tabFeed").classList.toggle("on", tab === "feed");
-  $("tabTrig").classList.toggle("on", tab === "trig");
+  state.tab = ["feed", "trig", "week"].includes(tab) ? tab : "feed"; persist();
+  $("feed").classList.toggle("hidden", state.tab !== "feed");
+  $("trigPanel").classList.toggle("hidden", state.tab !== "trig");
+  $("weekPanel").classList.toggle("hidden", state.tab !== "week");
+  $("tabFeed").classList.toggle("on", state.tab === "feed");
+  $("tabTrig").classList.toggle("on", state.tab === "trig");
+  $("tabWeek").classList.toggle("on", state.tab === "week");
+  if (document.body.classList.contains("map-max") && state.tab !== "feed") toggleMapMax(false);
+}
+
+/* ---------- Vollbild & große Karte ---------- */
+function toggleFullscreen() {
+  const el = document.documentElement;
+  const isFs = document.fullscreenElement || document.webkitFullscreenElement;
+  if (isFs) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+  else (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+}
+function toggleMapMax(force) {
+  const on = typeof force === "boolean" ? force : !document.body.classList.contains("map-max");
+  document.body.classList.toggle("map-max", on);
+  $("mapMaxBtn").classList.toggle("on", on);
+  setTimeout(() => map.invalidateSize(), 60);
 }
 
 /* ---------- Feed ---------- */
@@ -473,8 +800,15 @@ function cardHtml(t) {
     ${(t.triggers || []).length || (t.entities || []).length ? `<div class="flex flex-wrap gap-1 mt-2.5">${(t.triggers || []).map((x) => trigChip(t, x)).join("")}${t.entities.map(entityChip).join("")}</div>` : ""}
     <div class="flex items-center gap-2 mt-2.5 pt-2 border-t border-[#1b2433] text-[11px] text-slate-500">
       <span class="truncate">${esc(t.source_name)}</span><span class="text-slate-700">·</span><span>${esc(fmtTime(t.timestamp))}</span>
+      ${(t.related || []).length ? `<button class="chip rounded px-1.5 py-0.5 text-[10.5px] hover:text-white" data-related="${esc(t.id)}">+${t.related.length} ${t.related.length === 1 ? "Quelle" : "Quellen"}</button>` : ""}
       <span class="ml-auto">${esc(ANALYSIS_LABEL[t.analysis] || "")}</span>
     </div>
+    ${state.openRelated.has(t.id) ? `<ul class="mt-1.5 space-y-1 text-[11.5px]">${(t.related || []).map((r) => {
+      const u = safeUrl(r.source_url);
+      return `<li class="flex gap-2"><span class="text-slate-500 whitespace-nowrap">${esc(r.source_name)}</span>${u
+        ? `<a class="text-slate-300 hover:text-[#22d3ee] truncate" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(r.title)}</a>`
+        : `<span class="text-slate-300 truncate">${esc(r.title)}</span>`}</li>`;
+    }).join("")}</ul>` : ""}
   </article>`;
 }
 
@@ -508,7 +842,10 @@ function render() {
   renderMarkers(list);
   renderFeed(list);
   renderTriggers();
-  const a = triggerPoints("A").length, bd = triggerPoints("B").length + triggerPoints("D").length;
+  renderWeek();
+  renderBanners();
+  renderHome();
+  const a = triggerPoints("A").length, bd = ["B", "D", "F"].reduce((n, l) => n + triggerPoints(l).length, 0);
   $("tabTrig").innerHTML = `Trigger-Monitor${a ? ` <span class="tchip tA rounded px-1 text-[10px] mono">A ${a}</span>` : ""}${bd ? ` <span class="tchip tB rounded px-1 text-[10px] mono">${bd}</span>` : ""}`;
   if (state.selectedId && !list.some((t) => t.id === state.selectedId)) state.selectedId = null;
   $("clearSel").classList.toggle("hidden", !state.selectedId);
@@ -554,14 +891,58 @@ function clearSelection() {
 document.addEventListener("click", (ev) => {
   const tab = ev.target.closest("[data-tab]"); if (tab) return setTab(tab.dataset.tab);
   if (ev.target.closest("[data-trigonly]")) { state.onlyTrig = !state.onlyTrig; persist(); return render(); }
+  if (ev.target.closest("[data-localonly]")) {
+    state.onlyLocal = !state.onlyLocal; persist();
+    if (state.onlyLocal) { setTab("feed"); const h = home(); if (h) map.flyTo([h.lat, h.lon], 8, { duration: 0.8 }); }
+    return render();
+  }
+  const rel = ev.target.closest("[data-related]");
+  if (rel) { ev.stopPropagation(); const id = rel.dataset.related; state.openRelated.has(id) ? state.openRelated.delete(id) : state.openRelated.add(id); return renderFeed(visibleSet()); }
+  const conf = ev.target.closest("[data-confirm]");
+  if (conf) {
+    const k = conf.dataset.confirm;
+    if (state.confirmed[k]) return decide({ action: "unconfirm", key: k });
+    const [id, tid] = k.split(":"), t = state.byId.get(id), d = trigDef(tid);
+    if (!t) return;
+    const note = prompt(`Bestätigen für das Ereignisprotokoll:\n${tid} – ${d.label}\n\nOptionale Notiz (z. B. wo verifiziert):`, "");
+    if (note === null) return;
+    return decide({ action: "confirm", key: k, event_date: t.timestamp.slice(0, 10), title: t.title, source_url: t.source_url,
+                    trigger: tid, list: d.list, label: d.label, stage_after: stageAfter(d.list, tid), note });
+  }
+  const pdel = ev.target.closest("[data-protodel]");
+  if (pdel) {
+    if (!confirm("Eintrag aus dem Ereignisprotokoll entfernen?")) return;
+    const [kind, ...rest] = pdel.dataset.protodel.split(":"), key = rest.join(":");
+    return decide(kind === "c" ? { action: "unconfirm", key } : { action: "manual_remove", key });
+  }
+  if (ev.target.closest("[data-manadd]")) {
+    const title = $("manTitle").value.trim(), tid = $("manTrig").value;
+    if (!title) return $("manTitle").focus();
+    const d = tid ? trigDef(tid) : null;
+    return decide({ action: "manual_add", event_date: $("manDate").value, title, trigger: tid, list: d ? d.list : "",
+                    stage_after: $("manStage").value.trim() || (d ? stageAfter(d.list, tid) : "") });
+  }
+  if (ev.target.closest("[data-maint]")) return decide({ action: "maintenance_done", date: new Date().toISOString().slice(0, 10) });
+  const pr = ev.target.closest("[data-print]"); if (pr) return printView(pr.dataset.print);
+  if (ev.target.closest("[data-testpush]")) {
+    state.pushResult = "wird gesendet …"; renderTriggers();
+    fetch("api/test-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
+      .then((r) => r.json()).then((j) => { state.pushResult = j.sent ? `gesendet über: ${j.sent.join(", ") || "keinen Kanal"}` : `Fehler: ${j.error}`; })
+      .catch(() => { state.pushResult = "Fehler: FasTI-Server nicht erreichbar"; })
+      .finally(renderTriggers);
+    return;
+  }
   const tg = ev.target.closest("[data-toggle-trig]");
   if (tg) { const id = tg.dataset.toggleTrig; state.openTrig.has(id) ? state.openTrig.delete(id) : state.openTrig.add(id); return renderTriggers(); }
   const dis = ev.target.closest("[data-dismiss]");
-  if (dis) { const k = dis.dataset.dismiss; state.dismissed.has(k) ? state.dismissed.delete(k) : state.dismissed.add(k); persist(); return render(); }
+  if (dis) { const k = dis.dataset.dismiss; return decide({ action: state.dismissed.has(k) ? "undismiss" : "dismiss", key: k }); }
   const go = ev.target.closest("[data-goto]");
   if (go) {
     const t = state.byId.get(go.dataset.goto);
-    if (t && !visibleSet().some((x) => x.id === t.id)) { state.cat = "all"; state.minSev = 0; state.hours = 0; state.q = ""; $("search").value = ""; render(); }
+    if (t && !visibleSet().some((x) => x.id === t.id)) {
+      Object.assign(state, { cat: "all", minSev: 0, hours: 0, q: "", onlyTrig: false, onlyLocal: false });
+      $("search").value = ""; render();
+    }
     return select(go.dataset.goto, "feed");
   }
   const cat = ev.target.closest("[data-cat]"); if (cat) { state.cat = cat.dataset.cat; persist(); return render(); }
@@ -580,7 +961,18 @@ $("feed").addEventListener("keydown", (ev) => {
   const card = ev.target.closest("article[data-id]");
   if (card && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); select(card.dataset.id, "feed"); }
 });
-document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") clearSelection(); });
+document.addEventListener("change", (ev) => {
+  const pref = ev.target.closest("[data-pref]");
+  if (pref) decide({ action: "set_pref", name: pref.dataset.pref, value: pref.checked });
+});
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape") return clearSelection();
+  if (ev.metaKey || ev.ctrlKey || ev.altKey || /^(INPUT|SELECT|TEXTAREA)$/.test(ev.target.tagName)) return;
+  if (ev.key === "f" || ev.key === "F") toggleFullscreen();
+  if (ev.key === "m" || ev.key === "M") toggleMapMax();
+});
+$("fsBtn").addEventListener("click", toggleFullscreen);
+$("mapMaxBtn").addEventListener("click", () => toggleMapMax());
 let qTimer;
 $("search").addEventListener("input", (ev) => { clearTimeout(qTimer); qTimer = setTimeout(() => { state.q = ev.target.value.trim(); render(); }, 150); });
 $("sort").addEventListener("change", (ev) => { state.sort = ev.target.value; persist(); render(); });
@@ -637,7 +1029,7 @@ function updateStatus() {
 }
 
 setTab(state.tab);
-load();
+loadDecisions().finally(() => load(true));
 setInterval(load, REFRESH_MS);
 setInterval(() => {
   updateStatus();

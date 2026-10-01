@@ -40,6 +40,19 @@ Der Tab „Trigger-Monitor“ zeigt die Einschätzung nach Plan: ein Punkt aus L
 
 Für die Nachbarstaaten in `AA_WATCH_COUNTRIES` meldet das Backend jede Aktualisierung der AA-Reisehinweise und prüft den Volltext auf Ausreiseaufrufe (A8). Zusätzlich laufen US-Botschafts-Alerts (DE, PL, LT, LV, EE), FCDO-Länderfeeds, NATO-News, Bundestag-hib und gezielte Google-News-Suchen pro Trigger.
 
+## Weitere Funktionen
+
+- **Finanzstress (F1–F5):** Bankfeiertage/Kapitalverkehrskontrollen, Börsen-Handelsaussetzungen, Ausfälle von Zahlungssystemen, Zentralbank-Notmaßnahmen, Bankenrettungen. Reine Lageinformation wie die diplomatischen Signale.
+- **Push aufs iPhone** über die kostenlose App ntfy (Thema steht im Trigger-Monitor) plus Mac-Mitteilungen: neue A-Treffer, Wechsel auf Stufe 2, Warnungen vor Ort ab Severity 7, ausgefallene kritische Quellen. Test: `bash start.sh --test-push`.
+- **Ereignisprotokoll:** Treffer bestätigen oder manuell eintragen, druckbar; optional zählt die Stufenanzeige nur bestätigte Treffer. Gespeichert in `decisions.json`.
+- **Entwarnung, Prüfrhythmus, Wartungscheck** nach Plan direkt in der Stufenanzeige; Banner am 27.03./27.09.
+- **Lage vor Ort:** NINA-Dashboard (BBK, DWD, Polizei, Hochwasser) für die Kreise in `LOCAL_DISTRICTS`, Umkreis um `HOME_NAME` auf der Karte, Filter „Vor Ort“.
+- **Wochenlage:** Trigger und Kategorien gegenüber Vorwoche, zehn schwerste Ereignisse, druckbar.
+- **Dubletten:** dieselbe Geschichte aus mehreren Quellen wird zu einer Karte mit „+n Quellen“.
+- **Warnung bei toten Quellen:** kritische Quellen (`CRITICAL_FEEDS`) länger als 24 h ohne Daten → Banner und Push.
+- **Vollbild** (Taste F) und **große Karte** (Taste M).
+- **Autostart:** Ordner in den Benutzerordner legen (macOS sperrt Hintergrunddienste für Schreibtisch/Dokumente), dann `cd ~/FasTI && bash start.sh --autostart`. Entfernen mit `--autostart-aus`. Solange FasTI läuft, verhindert es den Ruhezustand.
+
 ## Dateien
 
 | Datei | Zweck |
@@ -47,7 +60,9 @@ Für die Nachbarstaaten in `AA_WATCH_COUNTRIES` meldet das Backend jede Aktualis
 | `config.py` | Quellen, API-Keys, Limits, Intervalle |
 | `backend.py` | Fetcher + KI-Analyse, schreibt `threats.json` atomar und dedupliziert |
 | `index.html` | Dashboard (Tailwind + Leaflet via CDN), lädt `threats.json` alle 30 s nach |
-| `start.sh` | Ein-Befehl-Start für macOS |
+| `server.py` | Lokaler Webserver: liefert nur Dashboard und Lagedaten, speichert Protokoll/Entscheidungen |
+| `keys.py` | Persönliche Keys und Einstellungen (wird bei Updates nicht ersetzt) |
+| `start.sh` | Ein-Befehl-Start für macOS, Autostart, Test-Push |
 
 Backend manuell: `.venv/bin/python backend.py [--loop] [--no-ai] [--reset] [-v]`.
 
@@ -62,4 +77,4 @@ Reuters bietet seit 2020 keine öffentlichen RSS-Feeds mehr. Eigene Quellen erg�
 
 ## Sicherheit
 
-Der Webserver ist nur an `127.0.0.1` gebunden. `http.server` liefert allerdings jede Datei im Ordner aus, also auch `config.py` und `.env`. Für ein Single-User-Setup auf dem eigenen Mac ist das vertretbar; den Port nicht ins Netz weiterleiten. Alle Feed-Inhalte werden im Frontend HTML-escaped, Links nur mit http(s) übernommen.
+Der Webserver (`server.py`) ist nur an `127.0.0.1` gebunden, liefert ausschließlich `index.html`, `threats.json` und die Entscheidungs-API aus (keine Keys, keine Konfiguration) und weist fremde Hosts und Origins ab. Alle Feed-Inhalte werden im Frontend HTML-escaped, Links nur mit http(s) übernommen.

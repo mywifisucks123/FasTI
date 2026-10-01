@@ -183,6 +183,12 @@ FEEDS = [
      "url": gnews('Sabotage Bahn OR Stromnetz OR Kabel OR Datennetz Deutschland')},
     {"name": "Suche: Ostflanke / Geheimdienstwarnung", "category": "geopolitics", "type": "rss", "filter": True,
      "url": gnews('Ostflanke NATO Verlegung OR Geheimdienst warnt Polen OR Baltikum')},
+    {"name": "Suche: Finanzstress (DE)", "category": "infrastructure", "type": "rss", "filter": True,
+     "url": gnews('Bankfeiertag OR Kapitalverkehrskontrollen OR Abhebelimit OR "Handel ausgesetzt" OR Bankenrettung OR "EZB Notfall"')},
+    {"name": "Suche: Finanzstress (EN)", "category": "infrastructure", "type": "rss", "filter": True,
+     "url": gnews('"bank holiday" OR "capital controls" OR "withdrawal limits" OR "trading halted" OR "bank run" OR "emergency ECB" Europe', "en")},
+    {"name": "Suche: Zahlungsausfall Karten / Überweisung", "category": "infrastructure", "type": "rss", "filter": True,
+     "url": gnews('Kartenzahlung Störung bundesweit OR Girocard Ausfall OR Überweisungen gestört OR Geldautomaten Ausfall')},
     {"name": "Suche: Grenzkontrollen / Hamsterkäufe", "category": "infrastructure", "type": "rss", "filter": True,
      "url": gnews('Grenzkontrollen verlängert OR Hamsterkäufe OR "leere Regale" OR Bargeld abheben Krise')},
 
@@ -197,6 +203,8 @@ FEEDS = [
     # --- Infrastruktur, Bevölkerungsschutz & Supply Chain ------------------
     {"name": "BSI Aktuelles", "url": gnews("site:bsi.bund.de"),
      "category": "infrastructure", "type": "rss"},
+    {"name": "NINA Lage vor Ort (OWL)", "url": "https://warnung.bund.de/api31/dashboard/",
+     "category": "infrastructure", "type": "nina_local"},
     {"name": "NINA MoWaS (BBK)", "url": "https://warnung.bund.de/api31/mowas/mapData.json",
      "category": "infrastructure", "type": "nina"},
     {"name": "NINA KATWARN", "url": "https://warnung.bund.de/api31/katwarn/mapData.json",
@@ -311,7 +319,77 @@ TRIGGERS = [
      "ai": "Ein Außenministerium (USA, UK, Deutschland oder anderes) verschärft Reise- oder Sicherheitshinweise für "
            "Deutschland, Polen, Litauen, Lettland oder Estland.",
      "match": [r"travel advi|reisehinweis|reisewarnung|sicherheitshinweis|level [34]", _DE_PL_BALT]},
+
+    {"id": "F1", "list": "F", "label": "Bankfeiertag, Abhebelimits oder Kapitalverkehrskontrollen in der EU",
+     "ai": "Ein EU-/EWR-Staat oder die Schweiz verhängt Bankfeiertage, Bankschließungen, Abhebelimits für Bargeld "
+           "oder Kapitalverkehrskontrollen. Feiertage im Kalendersinn ('bank holiday' UK) zählen NICHT.",
+     "match": [r"bankfeiertag|bankschließ|abhebelimit|abhebungsgrenze|kapitalverkehrskontroll|capital controls|withdrawal limit|banks? (closed|shut)|bank run|bankensturm"]},
+    {"id": "F2", "list": "F", "label": "Handelsaussetzung an einer großen Börse",
+     "ai": "Der Handel an einer großen Börse (Frankfurt/Xetra, Euronext, London, New York, Nasdaq, Tokio u. a.) wird "
+           "marktweit ausgesetzt (Circuit Breaker, Notschließung). Aussetzung einzelner Aktien zählt NICHT.",
+     "match": [r"trading (halt|suspend)|handel.{0,30}(ausgesetzt|unterbrochen)|circuit breaker|börse.{0,30}geschlossen|market.{0,20}(halt|closed)",
+               r"börse|exchange|xetra|nyse|nasdaq|euronext|dax|stock market|aktienmarkt"]},
+    {"id": "F3", "list": "F", "label": "Ausfall von Zahlungssystemen (Karten, Überweisungen, Bargeldversorgung)",
+     "ai": "Landesweiter oder großflächiger Ausfall von Kartenzahlung, Überweisungsverkehr (SEPA/TARGET), "
+           "Geldautomaten oder Bargeldversorgung in Deutschland oder der EU. Störungen einzelner Filialen zählen NICHT.",
+     "match": [r"kartenzahlung|girocard|ec-karte|card payment|überweisung|sepa\b|target2|t2\b|geldautomat|atm\b|bargeldversorgung|zahlungsverkehr",
+               r"ausfall|störung|gestört|outage|disrupt|nicht möglich|funktionier.{0,20}nicht"]},
+    {"id": "F4", "list": "F", "label": "Notmaßnahmen von EZB oder Bundesbank außerhalb regulärer Sitzungen",
+     "ai": "EZB, Bundesbank oder eine andere große Zentralbank ergreift Notmaßnahmen außerhalb des regulären "
+           "Sitzungskalenders (Notsitzung, Notzinssenkung, Notliquidität, Swap-Linien). Reguläre Zinsentscheide zählen NICHT.",
+     "match": [r"ezb|ecb|bundesbank|zentralbank|central bank|fed\b|federal reserve", r"notfall|notsitzung|notmaßnahm|emergency|außerplanmäßig|unscheduled|notliquidität"]},
+    {"id": "F5", "list": "F", "label": "Staatliche Bankenrettung oder Moratorium",
+     "ai": "Ein Staat oder die Bankenaufsicht rettet eine Bank, stellt sie unter Zwangsverwaltung, verhängt ein "
+           "Moratorium oder schließt sie (Abwicklung). Gilt für Banken in Deutschland/EU/Schweiz/UK/USA mit Systemrelevanz.",
+     "match": [r"bank|sparkasse|volksbank|kreditinstitut", r"rettung|bailout|bail-out|moratori|zwangsverwalt|abwickl|resolution|insolven|gerettet|verstaatlich|nationali[sz]"]},
 ]
+
+# Quellen, deren Ausfall ein blinder Fleck für die Trigger wäre. Fallen sie länger
+# als SOURCE_DEAD_HOURS aus, zeigt das Dashboard eine Warnung (und sendet eine Push).
+CRITICAL_FEEDS = [
+    "Auswärtiges Amt Reisewarnungen", "US State Dept Travel Advisories", "UK FCDO Travel Advice",
+    "US-Botschaft Deutschland", "US-Botschaft Polen", "UK FCDO Deutschland", "UK FCDO Polen",
+    "NINA MoWaS (BBK)", "Tagesschau Inland", "Tagesschau Ausland",
+    "Suche: Botschaften Ausreise", "Suche: Spannungsfall / Bundestag", "Suche: Mobilmachung / Reservisten",
+    "Suche: NATO Artikel 4 / 5", "Suche: Luftraum gesperrt",
+]
+SOURCE_DEAD_HOURS = 24
+
+# ---------------------------------------------------------------------------
+# Lage vor Ort (Stufe 5 des Plans)
+# ---------------------------------------------------------------------------
+# Mittelpunkt und Radius für "Lage vor Ort" auf der Karte und im Trigger-Monitor.
+HOME_NAME = "Bielefeld"
+HOME_LAT, HOME_LON = 52.0302, 8.5325
+LOCAL_RADIUS_KM = 50
+# Kreise, deren NINA-Warnungen (inkl. DWD-Unwetter, Polizei, Hochwasser) gezielt
+# abgefragt werden. Schlüssel = 5-stelliger Kreisschlüssel (AGS), Wert = Name, Lat, Lon.
+LOCAL_DISTRICTS = {
+    "05711": ("Bielefeld", 52.0302, 8.5325),
+    "05754": ("Kreis Gütersloh", 51.9060, 8.3800),
+    "05758": ("Kreis Herford", 52.1150, 8.6730),
+    "05766": ("Kreis Lippe", 51.9380, 8.8800),
+    "05770": ("Kreis Minden-Lübbecke", 52.2900, 8.9200),
+    "05774": ("Kreis Paderborn", 51.7190, 8.7540),
+}
+# DWD-Warnungen erst ab dieser Stufe übernehmen (Minor = Wetterhinweis, Moderate = markant, Severe = Unwetter)
+LOCAL_DWD_MIN_SEVERITY = "Moderate"
+
+# ---------------------------------------------------------------------------
+# Benachrichtigungen (iPhone über die kostenlose App "ntfy", Mac-Mitteilungen)
+# ---------------------------------------------------------------------------
+NOTIFY_MAC = True                 # Mitteilung mit Ton auf dem Mac
+NTFY_ENABLED = True               # Push aufs iPhone über ntfy.sh (kein Konto nötig)
+NTFY_SERVER = "https://ntfy.sh"
+NTFY_TOPIC = ""                   # leer = wird beim ersten Start zufällig erzeugt (siehe Dashboard)
+NOTIFY_LISTS = ["A"]              # Trigger-Listen mit Push (z. B. ["A", "F"])
+NOTIFY_LOCAL_MIN_SEVERITY = 7     # Lage vor Ort: Push ab dieser Severity (7 = Unwetter/Severe)
+
+# ---------------------------------------------------------------------------
+# Dubletten: dieselbe Geschichte aus mehreren Quellen wird zu einer Karte
+# ---------------------------------------------------------------------------
+DEDUP_HOURS = 48                  # nur innerhalb dieses Zeitfensters zusammenfassen
+DEDUP_MIN_SIMILARITY = 0.5        # Wortüberdeckung der Titel (0–1), höher = vorsichtiger
 
 
 # ---------------------------------------------------------------------------

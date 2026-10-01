@@ -8,3 +8,7 @@ server.log
 .env
 .DS_Store
 keys.py
+fasti_state.json
+decisions.json
+autostart.log
+*.tmp
