@@ -1,0 +1,16 @@
+services:
+  tonspur:
+    build: .
+    container_name: tonspur
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Jellyfin und Deemix laufen auf dem Mac selbst, nicht in diesem Container
+      JELLYFIN_URL: http://host.docker.internal:8096
+      DEEMIX_URL: http://host.docker.internal:6595
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
