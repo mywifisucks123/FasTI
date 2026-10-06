@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>Tonspur</title>
+  <meta name="description" content="Persönlicher Musik-Player">
+  <meta name="theme-color" content="#000000">
+  <meta name="color-scheme" content="dark">
+
+  <!-- iOS: Vollbild ohne Safari-Leisten, transparente Statusleiste -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Tonspur">
+  <meta name="format-detection" content="telephone=no">
+
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="/css/app.css">
+  <script type="module" src="/js/app.js"></script>
+</head>
+<body>
+  <main id="view" class="view-root" aria-live="polite"></main>
+
+  <!-- Mini-Player -->
+  <div id="mini" class="mini hidden" role="button" aria-label="Player öffnen">
+    <img class="mini-art" alt="">
+    <div class="mini-meta">
+      <div class="mini-title"></div>
+      <div class="mini-artist"></div>
+    </div>
+    <button class="icon-btn mini-toggle" data-action="toggle" aria-label="Wiedergabe"></button>
+    <button class="icon-btn mini-next" data-action="next" aria-label="Nächster Titel"></button>
+    <div class="mini-progress"><span></span></div>
+  </div>
+
+  <!-- Tab-Leiste -->
+  <nav class="tabbar" id="tabbar">
+    <a href="#/" data-tab="search"><span class="tab-icon" data-icon="search"></span><span>Suchen</span></a>
+    <a href="#/library" data-tab="library"><span class="tab-icon" data-icon="library"></span><span>Bibliothek</span></a>
+  </nav>
+
+  <!-- Vollbild-Player -->
+  <section id="now" class="now" aria-hidden="true">
+    <div class="now-bg"><img alt=""></div>
+    <div class="now-inner">
+      <button class="now-grabber" data-action="close-now" aria-label="Schließen"><span></span></button>
+      <div class="now-art-wrap"><img class="now-art" alt=""></div>
+      <div class="now-head">
+        <div class="now-meta">
+          <div class="now-title"></div>
+          <button class="now-artist" data-action="goto-artist"></button>
+        </div>
+        <button class="icon-btn now-fav" data-action="fav-current" aria-label="Favorit"></button>
+      </div>
+      <div class="scrubber">
+        <input type="range" class="scrub" min="0" max="1000" value="0" step="1" aria-label="Position">
+        <div class="times"><span class="t-cur">0:00</span><span class="now-source"></span><span class="t-left">-0:00</span></div>
+      </div>
+      <div class="controls">
+        <button class="icon-btn big" data-action="prev" aria-label="Zurück"></button>
+        <button class="icon-btn huge" data-action="toggle" aria-label="Wiedergabe"></button>
+        <button class="icon-btn big" data-action="next" aria-label="Weiter"></button>
+      </div>
+      <div class="now-foot">
+        <button class="icon-btn small" data-action="shuffle" aria-label="Zufall"></button>
+        <button class="icon-btn small airplay hidden" data-action="airplay" aria-label="AirPlay"></button>
+        <button class="icon-btn small" data-action="repeat" aria-label="Wiederholen"></button>
+      </div>
+    </div>
+  </section>
+
+  <div id="toast" class="toast" role="status"></div>
+</body>
+</html>

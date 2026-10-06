@@ -78,3 +78,7 @@ Reuters bietet seit 2020 keine öffentlichen RSS-Feeds mehr. Eigene Quellen erg�
 ## Sicherheit
 
 Der Webserver (`server.py`) ist nur an `127.0.0.1` gebunden, liefert ausschließlich `index.html`, `threats.json` und die Entscheidungs-API aus (keine Keys, keine Konfiguration) und weist fremde Hosts und Origins ab. Alle Feed-Inhalte werden im Frontend HTML-escaped, Links nur mit http(s) übernommen.
+
+## Weiteres Projekt im Repo
+
+`music-player/` – Tonspur, persönlicher Musik-Player als iOS-PWA mit Jellyfin/Deemix-Anbindung. Anleitung: [music-player/README.md](music-player/README.md).
