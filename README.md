@@ -27,6 +27,7 @@ Das Skript installiert fehlende Systempakete, Ollama (offizielles Installationss
 - `bash install-server.sh --ohne-ki` – ohne lokale KI (nur regelbasiert)
 - `bash install-server.sh --entfernen` – Dienst entfernen, Daten bleiben
 - Nach einem Update der Dateien: `bash install-server.sh` erneut ausführen.
+- Von unterwegs über Tailscale: Tailscale auf Server und iPhone, dann `http://<servername>:8000` (MagicDNS) bzw. die 100.x-Adresse. Optional HTTPS mit `sudo tailscale serve --bg 8000`. Bei aktiver ufw zusätzlich `sudo ufw allow in on tailscale0 to any port 8000 proto tcp`.
 
 Mitnehmen vom Mac: `keys.py`, `decisions.json` (Protokoll, verworfene Fehlalarme), `fasti_state.json` (Push-Thema, das iPhone muss nicht neu abonnieren) und optional `threats.json`.
 

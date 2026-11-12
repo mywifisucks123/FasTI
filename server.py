@@ -175,7 +175,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self._allowed_host():
             return self._send(403, b"forbidden", "text/plain")
         origin = (self.headers.get("Origin") or "").lower()
-        if origin and not (origin.startswith("http://") and host_allowed(origin[7:].split("/")[0])):
+        scheme, _, rest = origin.partition("://")
+        if origin and not (scheme in ("http", "https") and host_allowed(rest.split("/")[0])):
             return self._send(403, b"forbidden", "text/plain")
         if "application/json" not in (self.headers.get("Content-Type") or ""):
             return self._send(415, b"json required", "text/plain")
