@@ -5,16 +5,19 @@ FasTI – lokaler Webserver für das Dashboard.
 
 Liefert ausschließlich index.html und threats.json aus (keine Keys, keine Konfiguration)
 und speichert Entscheidungen aus dem Dashboard (Ereignisprotokoll, verworfene Fehlalarme,
-Wartungscheck) in decisions.json. Nur an 127.0.0.1 gebunden.
+Wartungscheck) in decisions.json.
 
-  python3 server.py [--port 8000]
+  python3 server.py [--port 8000]                 nur auf diesem Rechner (127.0.0.1)
+  python3 server.py --bind 0.0.0.0 [--port 8000]  im Heimnetz erreichbar (Homeserver)
 """
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import re
+import socket
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -27,6 +30,33 @@ STATIC = {"/": ("index.html", "text/html; charset=utf-8"),
           "/threats.json": ("threats.json", "application/json; charset=utf-8")}
 LOCK = threading.Lock()
 MAX_BODY = 64 * 1024
+HOSTNAME = socket.gethostname().split(".")[0].lower()
+try:  # zusätzliche erlaubte Hostnamen, z. B. ein Tailscale-Name
+    import config  # noqa: E402
+    EXTRA_HOSTS = {h.lower() for h in getattr(config, "SERVER_EXTRA_HOSTS", [])}
+except Exception:  # noqa: BLE001
+    EXTRA_HOSTS = set()
+
+
+def host_allowed(host: str) -> bool:
+    """Schutz vor DNS-Rebinding: nur IP-Adressen, localhost und der Name dieses Rechners.
+
+    Eine fremde Webseite kann den Server nur über einen eigenen Domainnamen ansprechen –
+    der wird hier abgewiesen. IP-Adressen und der eigene Rechnername sind unkritisch.
+    """
+    host = (host or "").strip().lower()
+    if host.startswith("["):  # IPv6 [::1]:8000
+        host = host[1:host.find("]")] if "]" in host else host
+    else:
+        host = host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+    if not host:
+        return False
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        pass
+    return host == "localhost" or host in EXTRA_HOSTS or host == HOSTNAME or host.startswith(HOSTNAME + ".")
 
 
 def now_iso() -> str:
@@ -107,8 +137,7 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def _allowed_host(self) -> bool:
-        host = (self.headers.get("Host") or "").split(":")[0].lower()
-        return host in ("localhost", "127.0.0.1")
+        return host_allowed(self.headers.get("Host") or "")
 
     def _send(self, code: int, body: bytes, ctype: str = "application/json; charset=utf-8") -> None:
         self.send_response(code)
@@ -146,7 +175,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._allowed_host():
             return self._send(403, b"forbidden", "text/plain")
         origin = (self.headers.get("Origin") or "").lower()
-        if origin and not re.match(r"^http://(localhost|127\.0\.0\.1)(:\d+)?$", origin):
+        if origin and not (origin.startswith("http://") and host_allowed(origin[7:].split("/")[0])):
             return self._send(403, b"forbidden", "text/plain")
         if "application/json" not in (self.headers.get("Content-Type") or ""):
             return self._send(415, b"json required", "text/plain")
@@ -181,8 +210,10 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     parser = argparse.ArgumentParser(description="FasTI Dashboard-Server")
     parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--bind", default="127.0.0.1", help="0.0.0.0 = im Heimnetz erreichbar")
     args = parser.parse_args()
-    httpd = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    ThreadingHTTPServer.allow_reuse_address = True
+    httpd = ThreadingHTTPServer((args.bind, args.port), Handler)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

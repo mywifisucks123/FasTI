@@ -13,6 +13,23 @@ Das Skript legt beim ersten Start eine virtuelle Umgebung `.venv` an (umgeht die
 
 Optionen: `--no-ai`, `--no-loop`, `--port 8080`.
 
+## Betrieb auf einem Linux-Homeserver (24/7)
+
+Für Ubuntu/Debian mit systemd. Den kompletten Ordner (ohne `.venv`) auf den Server kopieren, dann dort als normaler Benutzer:
+
+```bash
+cd ~/FasTI && bash install-server.sh
+```
+
+Das Skript installiert fehlende Systempakete, Ollama (offizielles Installationsskript) samt Modell aus `keys.py`/`config.py`, richtet den Dienst `fasti` ein (Neustart bei Absturz und nach jedem Server-Neustart, niedrige Priorität) und gibt bei aktiver ufw-Firewall Port 8000 fürs Heimnetz frei. Das Dashboard ist danach unter `http://<Server-IP>:8000` erreichbar. Ollama hält das Modell nur 5 Minuten nach der letzten Anfrage im RAM (`OLLAMA_KEEP_ALIVE`), ein Modell gleichzeitig.
+
+- `bash install-server.sh --status` – läuft FasTI? letzte Log-Zeilen
+- `bash install-server.sh --ohne-ki` – ohne lokale KI (nur regelbasiert)
+- `bash install-server.sh --entfernen` – Dienst entfernen, Daten bleiben
+- Nach einem Update der Dateien: `bash install-server.sh` erneut ausführen.
+
+Mitnehmen vom Mac: `keys.py`, `decisions.json` (Protokoll, verworfene Fehlalarme), `fasti_state.json` (Push-Thema, das iPhone muss nicht neu abonnieren) und optional `threats.json`.
+
 ## Lokale KI (empfohlen, ohne Keys und Limits)
 
 1. Ollama installieren: https://ollama.com/download → „Download for macOS“, die App in den Programme-Ordner ziehen und einmal öffnen.
@@ -63,6 +80,7 @@ Für die Nachbarstaaten in `AA_WATCH_COUNTRIES` meldet das Backend jede Aktualis
 | `server.py` | Lokaler Webserver: liefert nur Dashboard und Lagedaten, speichert Protokoll/Entscheidungen |
 | `keys.py` | Persönliche Keys und Einstellungen (wird bei Updates nicht ersetzt) |
 | `start.sh` | Ein-Befehl-Start für macOS, Autostart, Test-Push |
+| `install-server.sh` | Einrichtung als Dauerdienst auf einem Ubuntu/Debian-Homeserver |
 
 Backend manuell: `.venv/bin/python backend.py [--loop] [--no-ai] [--reset] [-v]`.
 
@@ -77,7 +95,7 @@ Reuters bietet seit 2020 keine öffentlichen RSS-Feeds mehr. Eigene Quellen erg�
 
 ## Sicherheit
 
-Der Webserver (`server.py`) ist nur an `127.0.0.1` gebunden, liefert ausschließlich `index.html`, `threats.json` und die Entscheidungs-API aus (keine Keys, keine Konfiguration) und weist fremde Hosts und Origins ab. Alle Feed-Inhalte werden im Frontend HTML-escaped, Links nur mit http(s) übernommen.
+Der Webserver (`server.py`) ist auf dem Mac nur an `127.0.0.1` gebunden, auf dem Homeserver ans Heimnetz. Er liefert ausschließlich `index.html`, `threats.json` und die Entscheidungs-API aus (keine Keys, keine Konfiguration) und weist fremde Hosts und Origins ab. Alle Feed-Inhalte werden im Frontend HTML-escaped, Links nur mit http(s) übernommen.
 
 ## Weiteres Projekt im Repo
 

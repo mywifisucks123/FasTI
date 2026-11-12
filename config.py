@@ -29,6 +29,7 @@ OLLAMA_BATCH_SIZE = 1             # eine Meldung je Anfrage – kleine Modelle v
 OLLAMA_NUM_CTX = 8192             # Kontextfenster (Prompt + Antwort)
 OLLAMA_TIMEOUT = 900              # Sekunden je Anfrage
 OLLAMA_MAX_MINUTES_PER_RUN = 20   # Rechenzeit pro Durchlauf (Intervall ist 30 Min.)
+OLLAMA_KEEP_ALIVE = "5m"          # Modell nach der letzten Anfrage so lange im RAM halten
 
 # Key holen: https://aistudio.google.com/apikey
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "DEIN_KEY_HIER")
@@ -374,6 +375,10 @@ LOCAL_DISTRICTS = {
 }
 # DWD-Warnungen erst ab dieser Stufe übernehmen (Minor = Wetterhinweis, Moderate = markant, Severe = Unwetter)
 LOCAL_DWD_MIN_SEVERITY = "Moderate"
+
+# Zusätzliche Namen, unter denen das Dashboard aufgerufen werden darf (IP-Adressen und
+# der Rechnername sind immer erlaubt), z. B. ["homeserver.tail1234.ts.net"].
+SERVER_EXTRA_HOSTS = []
 
 # ---------------------------------------------------------------------------
 # Benachrichtigungen (iPhone über die kostenlose App "ntfy", Mac-Mitteilungen)

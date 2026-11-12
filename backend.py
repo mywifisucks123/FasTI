@@ -1329,7 +1329,7 @@ class AIClient:
         return resp
 
     def _ollama(self, model: str, prompt: str) -> requests.Response:
-        body = {"model": model, "stream": False, "format": "json", "keep_alive": "30m",
+        body = {"model": model, "stream": False, "format": "json", "keep_alive": OLLAMA_KEEP_ALIVE,
                 "options": {"temperature": 0.2, "num_ctx": OLLAMA_NUM_CTX},
                 "messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}]}
         return requests.post(f"{OLLAMA_URL}/api/chat", json=body, timeout=self.timeout)
@@ -1352,6 +1352,9 @@ OLLAMA_BATCH_SIZE = getattr(config, "OLLAMA_BATCH_SIZE", 1)
 OLLAMA_NUM_CTX = getattr(config, "OLLAMA_NUM_CTX", 8192)
 OLLAMA_TIMEOUT = getattr(config, "OLLAMA_TIMEOUT", 900)
 OLLAMA_MAX_MINUTES_PER_RUN = getattr(config, "OLLAMA_MAX_MINUTES_PER_RUN", 20)
+# Wie lange das Modell nach der letzten Anfrage im Arbeitsspeicher bleibt. Kurz halten, wenn
+# der Rechner noch andere Dienste hat: dann ist der Speicher zwischen den Durchläufen frei.
+OLLAMA_KEEP_ALIVE = getattr(config, "OLLAMA_KEEP_ALIVE", "5m")
 
 
 def ollama_models() -> list[str]:

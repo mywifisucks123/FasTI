@@ -9,6 +9,8 @@
 #   bash start.sh --no-ai        nur regelbasierte Analyse
 #   bash start.sh --no-loop      kein automatisches Nachladen im Hintergrund
 #   bash start.sh --port 8080    anderer Port
+#   bash start.sh --bind 0.0.0.0 Dashboard im Heimnetz erreichbar (Homeserver)
+#   bash start.sh --setup-only   nur Abhängigkeiten und KI-Modell einrichten
 #
 # Beenden mit Strg+C (stoppt Server und Hintergrund-Polling).
 # =============================================================================
@@ -22,6 +24,7 @@ VENV_DIR=".venv"
 BACKEND_ARGS=""
 LOOP=1
 HEADLESS=0
+BIND="127.0.0.1"
 MODE="run"
 LABEL="de.fasti.dashboard"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
@@ -32,10 +35,12 @@ while [ $# -gt 0 ]; do
     --no-loop)        LOOP=0 ;;
     --port)           PORT="${2:?Port fehlt}"; shift ;;
     --headless)       HEADLESS=1 ;;
+    --bind)           BIND="${2:?Adresse fehlt}"; shift ;;
+    --setup-only)     MODE="setup_only" ;;
     --autostart)      MODE="autostart" ;;
     --autostart-aus)  MODE="autostart_off" ;;
     --test-push)      MODE="test_push" ;;
-    -h|--help)        sed -n '2,15p' "$0"; exit 0 ;;
+    -h|--help)        sed -n '2,17p' "$0"; exit 0 ;;
     *) echo "Unbekannte Option: $1"; exit 1 ;;
   esac
   shift
@@ -140,8 +145,14 @@ PLISTEOF
   exit 0
 fi
 
+port_busy() {
+  if command -v lsof >/dev/null 2>&1; then lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1
+  elif command -v ss >/dev/null 2>&1; then ss -ltn "sport = :$PORT" 2>/dev/null | grep -q LISTEN
+  else return 1; fi
+}
+
 # --- Läuft FasTI schon (z. B. per Autostart)? ------------------------------------
-if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+if [ "$MODE" != "setup_only" ] && port_busy; then
   if [ "$HEADLESS" -eq 0 ] && curl -s --max-time 2 "$URL/api/decisions" >/dev/null 2>&1; then
     info "FasTI läuft bereits im Hintergrund – öffne das Dashboard."
     open_browser
@@ -161,6 +172,10 @@ if [ "$BACKEND_ARGS" != "--no-ai" ] && { [ -d /Applications/Ollama.app ] || comm
     done
   fi
   "$PY" backend.py --setup-ollama || warn "Lokale KI nicht bereit – nutze Cloud-KI bzw. regelbasierte Analyse."
+fi
+if [ "$MODE" = "setup_only" ]; then
+  info "Einrichtung abgeschlossen."
+  exit 0
 fi
 
 # --- 2. Datenabruf im Hintergrund ----------------------------------------------
@@ -204,7 +219,7 @@ fi
 
 # --- 3. Webserver ----------------------------------------------------------------
 # Eigener Server: nur an localhost gebunden, liefert ausschließlich Dashboard und Lagedaten.
-"$PY" server.py --port "$PORT" >>server.log 2>&1 &
+"$PY" server.py --port "$PORT" --bind "$BIND" >>server.log 2>&1 &
 SERVER_PID=$!
 
 for _ in $(seq 1 50); do
@@ -215,8 +230,12 @@ done
 
 # --- 4. Browser ------------------------------------------------------------------
 info "Dashboard läuft auf ${URL}  ${c_dim}(Strg+C zum Beenden)${c_off}"
+if [ "$BIND" != "127.0.0.1" ]; then
+  LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+  [ -n "${LAN_IP:-}" ] && info "Im Heimnetz: http://${LAN_IP}:${PORT}"
+fi
 TOPIC=$("$PY" -c 'import backend; print(backend.ntfy_topic())' 2>/dev/null || true)
-[ -n "$TOPIC" ] && info "Push aufs iPhone: App „ntfy“ → + → Thema ${TOPIC}"
+[ -n "$TOPIC" ] && info "Push aufs iPhone: App ntfy → + → Thema ${TOPIC}"
 [ "$HEADLESS" -eq 0 ] && open_browser
 
 wait "$SERVER_PID"
